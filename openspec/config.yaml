@@ -1,0 +1,37 @@
+schema: spec-driven
+
+context: |
+  Product: a physical, standalone focus timer built around an ESP32-C3 and Rust.
+  Core sessions must start, continue, and complete without a phone, computer,
+  network, cloud service, or desktop integration.
+  Primary input is a rotary encoder with push action; output is a small display,
+  a buzzer, and optional simple LEDs. The first prototype is breadboard-based and
+  USB-powered.
+  Architecture must isolate pure, host-testable session and preset logic from
+  ESP32-specific input, display, storage, clock, and feedback adapters.
+  This repository starts with planning artifacts only; exact board, display,
+  GPIO map, and Rust runtime stack are not yet selected.
+  Prefer the smallest useful offline MVP. Desktop automation, Spotify, wireless
+  provisioning, OTA, battery operation, analytics, PCB, and enclosure are later work.
+
+rules:
+  proposal:
+    - State MVP boundaries and non-goals explicitly.
+    - Call out assumptions that still require a hardware decision or bench validation.
+  specs:
+    - Express externally observable behavior with testable GIVEN/WHEN/THEN scenarios.
+    - Keep optional connectivity out of the critical timer path.
+    - Include degraded behavior for storage and peripheral failures where relevant.
+  design:
+    - Separate domain decisions from hardware-adapter decisions.
+    - Record alternatives and unresolved hardware choices instead of silently guessing.
+  tasks:
+    - Order work so pure Rust domain tests run before hardware integration.
+    - Include explicit host-test and on-device validation checkpoints.
+    - Do not schedule post-MVP integrations as implementation tasks.
+
+operations:
+  apply:
+    guidance:
+      - Pin toolchain and dependency versions once the target board and runtime stack are selected.
+      - Preserve a buildable, testable checkpoint at the end of each milestone.

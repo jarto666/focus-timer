@@ -1,0 +1,48 @@
+[package]
+name = "focus-firmware"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[features]
+default = ["esp-idf-runtime"]
+esp-idf-runtime = [
+    "dep:embedded-graphics",
+    "dep:esp-idf-svc",
+    "dep:log",
+    "dep:ssd1306",
+]
+ring-diagnostic = ["esp-idf-runtime"]
+ring-full-diagnostic = ["ring-diagnostic"]
+ring-capped-diagnostic = ["ring-diagnostic"]
+encoder-diagnostic = ["esp-idf-runtime"]
+oled-diagnostic = ["esp-idf-runtime"]
+buzzer-diagnostic = ["esp-idf-runtime"]
+acceptance-diagnostic = ["esp-idf-runtime"]
+
+[lib]
+name = "focus_firmware"
+path = "src/lib.rs"
+
+[[bin]]
+name = "focus-firmware"
+path = "src/main.rs"
+test = false
+bench = false
+required-features = ["esp-idf-runtime"]
+
+[dependencies]
+focus-core = { path = "../focus-core" }
+heapless = "=0.8.0"
+embedded-graphics = { version = "=0.8.2", optional = true }
+esp-idf-svc = { version = "=0.52.1", features = ["critical-section"], optional = true }
+log = { version = "=0.4.29", optional = true }
+ssd1306 = { version = "=0.10.0", optional = true }
+
+[build-dependencies]
+embuild = { version = "=0.33.2", features = ["espidf"] }
+
+[lints]
+workspace = true
