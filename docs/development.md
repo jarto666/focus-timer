@@ -74,6 +74,21 @@ clean build with a new external `CARGO_TARGET_DIR` also passed in 57.79 seconds,
 without deleting or relying on the repository's existing artifacts. The boot
 evidence is recorded in `docs/hardware.md`.
 
+## Diagnostic firmware layout
+
+Alternative hardware-test entrypoints live under
+`crates/focus-firmware/src/diagnostics/`. Each diagnostic feature still builds
+the complete `focus-firmware` executable, but compile-time `cfg` selection makes
+`main` enter exactly one diagnostic `run() -> !` instead of the production event
+loop. `diagnostics/mod.rs` owns feature routing and rejects incompatible
+diagnostics selected together.
+
+The root-level `runtime.rs`, `settings.rs`, and `nvs_settings.rs` are production
+modules. `acceptance-diagnostic` is intentionally different from the hardware
+diagnostics: it uses the production runtime and adapters with only the preset
+durations shortened to eight seconds. All production and diagnostic feature
+builds are checked after changing the routing or module layout.
+
 ## Archived WS2812 diagnostics (deferred from MVP)
 
 These feature builds are retained as evidence and as a possible starting point

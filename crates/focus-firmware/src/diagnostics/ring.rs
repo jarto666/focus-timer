@@ -45,7 +45,7 @@ const FULL_RING_WHITE: Rgb = Rgb {
     blue: 32,
 };
 
-pub fn run() -> ! {
+pub(super) fn run() -> ! {
     let peripherals = Peripherals::take().expect("ESP-IDF peripherals already taken");
     let mut channel = TxChannelDriver::new(
         peripherals.pins.gpio10,

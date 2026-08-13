@@ -14,7 +14,7 @@ const POLL_INTERVAL_MS: u32 = 5;
 const FIRST_PATTERN_AT_MS: u64 = 2_000;
 const BETWEEN_PATTERNS_MS: u64 = 2_000;
 
-pub fn run() -> ! {
+pub(super) fn run() -> ! {
     let peripherals = Peripherals::take().expect("ESP-IDF peripherals already taken");
     let mut output =
         PinDriver::output(peripherals.pins.gpio1).expect("failed to configure buzzer GPIO1");

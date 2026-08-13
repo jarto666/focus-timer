@@ -28,7 +28,7 @@ use focus_firmware::presentation::{OLED_LAYOUT, OledView, oled_view};
 const CANDIDATE_ADDRESSES: [u8; 2] = [0x3c, 0x3d];
 const FRAME_DURATION_MS: u32 = 3_000;
 
-pub fn run() -> ! {
+pub(super) fn run() -> ! {
     log::info!("OLED diagnostic: GND->GND, VDD->3V3, SCK/SCL->GPIO6, SDA->GPIO7; 100 kHz I2C");
 
     let peripherals = Peripherals::take().expect("ESP32 peripherals must be available once");

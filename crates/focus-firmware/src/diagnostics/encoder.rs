@@ -40,7 +40,7 @@ impl EventCounts {
     }
 }
 
-pub fn run() -> ! {
+pub(super) fn run() -> ! {
     let peripherals = Peripherals::take().expect("ESP-IDF peripherals already taken");
     let s1 = PinDriver::input(peripherals.pins.gpio0, Pull::Up)
         .expect("failed to configure EC11 S1 on GPIO0");

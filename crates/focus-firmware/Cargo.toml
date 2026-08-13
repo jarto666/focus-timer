@@ -21,6 +21,8 @@ encoder-diagnostic = ["esp-idf-runtime"]
 oled-diagnostic = ["esp-idf-runtime"]
 buzzer-diagnostic = ["esp-idf-runtime"]
 acceptance-diagnostic = ["esp-idf-runtime"]
+settings-clear-diagnostic = ["esp-idf-runtime"]
+settings-corrupt-diagnostic = ["esp-idf-runtime"]
 
 [lib]
 name = "focus_firmware"
