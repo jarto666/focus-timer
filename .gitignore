@@ -11,3 +11,5 @@ node_modules/
 .expo/
 dist/
 coverage/
+.playwright-cli/
+output/

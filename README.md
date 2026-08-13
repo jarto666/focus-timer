@@ -34,11 +34,13 @@ require Node.js:
 ./scripts/build-firmware.sh
 ```
 
-Mobile and shared TypeScript work require the pinned Node.js and pnpm versions
-that will be recorded when the Expo development build is initialized. They do
-not require a connected ESP32 when using the mock device:
+Mobile and shared TypeScript work use Node.js 24.12.0, pnpm 10.32.1, Expo SDK
+57, React 19.2.3, and React Native 0.86.2. They do not require a connected
+ESP32 when using the mock device:
 
 ```sh
+corepack enable
+pnpm install --frozen-lockfile
 ./scripts/check-mobile.sh
 ./scripts/check-protocol.sh
 ./scripts/check-all.sh

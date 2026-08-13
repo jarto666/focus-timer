@@ -16,3 +16,5 @@ fi
 
 cd "$REPO_ROOT"
 pnpm --filter @focus-timer/mobile check
+pnpm --filter @focus-timer/device-client check
+pnpm --filter @focus-timer/mock-device check

@@ -1,0 +1,25 @@
+{
+  "name": "focus-timer",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.32.1",
+  "engines": {
+    "node": ">=22.13.0 <25",
+    "pnpm": "10.32.1"
+  },
+  "scripts": {
+    "format": "prettier --check .",
+    "format:write": "prettier --write .",
+    "lint": "eslint apps/mobile packages",
+    "typecheck": "pnpm --recursive --if-present typecheck",
+    "test": "pnpm --recursive --if-present test",
+    "check": "pnpm format && pnpm lint && pnpm typecheck && pnpm test"
+  },
+  "devDependencies": {
+    "eslint": "9.39.5",
+    "eslint-config-expo": "57.0.1",
+    "prettier": "3.9.6",
+    "typescript": "6.0.3",
+    "vitest": "4.1.10"
+  }
+}

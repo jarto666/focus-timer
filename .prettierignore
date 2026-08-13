@@ -1,0 +1,14 @@
+.agents/
+.expo/
+.git/
+device/target/
+node_modules/
+coverage/
+dist/
+apps/mobile/assets/
+device/Cargo.lock
+docs/acceptance.md
+docs/development.md
+docs/hardware.md
+docs/wiring.md
+openspec/

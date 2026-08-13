@@ -1,0 +1,16 @@
+{
+  "name": "@focus-timer/device-protocol",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "format": "prettier --check .",
+    "lint": "eslint src",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --config ../../vitest.config.mts --root .",
+    "check": "pnpm format && pnpm lint && pnpm typecheck && pnpm test"
+  }
+}
