@@ -14,15 +14,17 @@ esp-idf-runtime = [
     "dep:log",
     "dep:ssd1306",
 ]
-ring-diagnostic = ["esp-idf-runtime"]
+# Internal aggregate selected transitively by concrete diagnostic modes.
+diagnostic-firmware = ["esp-idf-runtime"]
+ring-diagnostic = ["diagnostic-firmware"]
 ring-full-diagnostic = ["ring-diagnostic"]
 ring-capped-diagnostic = ["ring-diagnostic"]
-encoder-diagnostic = ["esp-idf-runtime"]
-oled-diagnostic = ["esp-idf-runtime"]
-buzzer-diagnostic = ["esp-idf-runtime"]
+encoder-diagnostic = ["diagnostic-firmware"]
+oled-diagnostic = ["diagnostic-firmware"]
+buzzer-diagnostic = ["diagnostic-firmware"]
 acceptance-diagnostic = ["esp-idf-runtime"]
-settings-clear-diagnostic = ["esp-idf-runtime"]
-settings-corrupt-diagnostic = ["esp-idf-runtime"]
+settings-clear-diagnostic = ["diagnostic-firmware"]
+settings-corrupt-diagnostic = ["diagnostic-firmware"]
 
 [lib]
 name = "focus_firmware"

@@ -1,38 +1,10 @@
-#[cfg(not(any(
-    feature = "ring-diagnostic",
-    feature = "encoder-diagnostic",
-    feature = "oled-diagnostic",
-    feature = "buzzer-diagnostic",
-    feature = "settings-clear-diagnostic",
-    feature = "settings-corrupt-diagnostic"
-)))]
+#[cfg(not(feature = "diagnostic-firmware"))]
 mod clock;
-#[cfg(any(
-    feature = "ring-diagnostic",
-    feature = "encoder-diagnostic",
-    feature = "oled-diagnostic",
-    feature = "buzzer-diagnostic",
-    feature = "settings-clear-diagnostic",
-    feature = "settings-corrupt-diagnostic"
-))]
+#[cfg(feature = "diagnostic-firmware")]
 mod diagnostics;
-#[cfg(not(any(
-    feature = "ring-diagnostic",
-    feature = "encoder-diagnostic",
-    feature = "oled-diagnostic",
-    feature = "buzzer-diagnostic",
-    feature = "settings-clear-diagnostic",
-    feature = "settings-corrupt-diagnostic"
-)))]
+#[cfg(not(feature = "diagnostic-firmware"))]
 mod nvs_settings;
-#[cfg(not(any(
-    feature = "ring-diagnostic",
-    feature = "encoder-diagnostic",
-    feature = "oled-diagnostic",
-    feature = "buzzer-diagnostic",
-    feature = "settings-clear-diagnostic",
-    feature = "settings-corrupt-diagnostic"
-)))]
+#[cfg(not(feature = "diagnostic-firmware"))]
 mod runtime;
 
 use esp_idf_svc::{hal::reset::ResetReason, log::EspLogger, sys};
@@ -46,23 +18,9 @@ fn main() {
         env!("CARGO_PKG_VERSION"),
         ResetReason::get()
     );
-    #[cfg(any(
-        feature = "ring-diagnostic",
-        feature = "encoder-diagnostic",
-        feature = "oled-diagnostic",
-        feature = "buzzer-diagnostic",
-        feature = "settings-clear-diagnostic",
-        feature = "settings-corrupt-diagnostic"
-    ))]
+    #[cfg(feature = "diagnostic-firmware")]
     diagnostics::run();
 
-    #[cfg(not(any(
-        feature = "ring-diagnostic",
-        feature = "encoder-diagnostic",
-        feature = "oled-diagnostic",
-        feature = "buzzer-diagnostic",
-        feature = "settings-clear-diagnostic",
-        feature = "settings-corrupt-diagnostic"
-    )))]
+    #[cfg(not(feature = "diagnostic-firmware"))]
     runtime::run();
 }

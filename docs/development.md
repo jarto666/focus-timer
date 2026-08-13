@@ -79,9 +79,12 @@ evidence is recorded in `docs/hardware.md`.
 Alternative hardware-test entrypoints live under
 `crates/focus-firmware/src/diagnostics/`. Each diagnostic feature still builds
 the complete `focus-firmware` executable, but compile-time `cfg` selection makes
-`main` enter exactly one diagnostic `run() -> !` instead of the production event
-loop. `diagnostics/mod.rs` owns feature routing and rejects incompatible
-diagnostics selected together.
+`main` enter exactly one diagnostic run loop instead of the production event
+loop. Concrete modes select the internal `diagnostic-firmware` aggregate
+transitively, so `main.rs` only needs one production-versus-diagnostic switch.
+Do not select that aggregate directly: `diagnostics/mod.rs` owns concrete feature
+routing and rejects both a missing concrete mode and incompatible diagnostics
+selected together.
 
 The root-level `runtime.rs`, `settings.rs`, and `nvs_settings.rs` are production
 modules. `acceptance-diagnostic` is intentionally different from the hardware

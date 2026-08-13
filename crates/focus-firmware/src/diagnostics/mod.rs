@@ -1,5 +1,17 @@
 //! Complete alternative firmware entrypoints selected by Cargo features.
 
+#[cfg(not(any(
+    feature = "ring-diagnostic",
+    feature = "encoder-diagnostic",
+    feature = "oled-diagnostic",
+    feature = "buzzer-diagnostic",
+    feature = "settings-clear-diagnostic",
+    feature = "settings-corrupt-diagnostic"
+)))]
+compile_error!(
+    "`diagnostic-firmware` is an internal aggregate; select one concrete diagnostic feature"
+);
+
 #[cfg(feature = "buzzer-diagnostic")]
 mod buzzer;
 #[cfg(feature = "encoder-diagnostic")]
@@ -39,7 +51,7 @@ mod settings;
 ))]
 compile_error!("select exactly one hardware diagnostic feature");
 
-pub(super) fn run() -> ! {
+pub(super) fn run() {
     #[cfg(feature = "ring-diagnostic")]
     ring::run();
 
