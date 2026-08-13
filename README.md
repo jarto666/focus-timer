@@ -1,15 +1,51 @@
 # Focus Timer
 
-Offline focus-timer firmware for an ESP32-C3-MINI-1-based development board.
-The active breadboard MVP uses an EC11 encoder and SSD1306 OLED; audible
-feedback is the next adapter, while the external WS2812 ring is deferred to a
-later hardware version.
+Focus Timer is an offline-first physical timer and its companion software. The
+validated USB-powered ESP32-C3 MVP uses an EC11 encoder, SSD1306 OLED, and 3 V
+active buzzer. Bluetooth synchronization and the iPhone companion are being
+added without making the phone part of timer correctness.
 
-The workspace separates pure, host-testable behavior from ESP32-specific
-adapters:
+## Product layout
 
-- `crates/focus-core`: `no_std` preset, session, input, and settings behavior.
-- `crates/focus-firmware`: `std + ESP-IDF` executable and hardware adapters.
+- `device/`: Rust workspace for pure domain behavior and ESP32 firmware.
+- `apps/`: product applications; the iPhone-first Expo app lives in
+  `apps/mobile/` once initialized.
+- `packages/`: reusable TypeScript protocol, device-client, and mock-device
+  packages.
+- `protocol/`: transport-independent schema and cross-language golden fixtures.
+- `scripts/`: root-invocable scoped and combined checks.
+- `docs/`: hardware, wiring, development, and acceptance evidence.
+- `openspec/`: product changes and capability specifications.
 
-See [docs/development.md](docs/development.md) for development commands and
-[docs/hardware.md](docs/hardware.md) for the evolving prototype wiring record.
+The Rust workspace currently contains:
+
+- `device/crates/focus-core`: `no_std` preset, session, input, and settings
+  behavior.
+- `device/crates/focus-firmware`: `std + ESP-IDF` executable and hardware
+  adapters.
+
+## Prerequisites and checks
+
+Device-only work requires Rust plus the documented ESP toolchain, and does not
+require Node.js:
+
+```sh
+./scripts/check-device.sh
+./scripts/build-firmware.sh
+```
+
+Mobile and shared TypeScript work require the pinned Node.js and pnpm versions
+that will be recorded when the Expo development build is initialized. They do
+not require a connected ESP32 when using the mock device:
+
+```sh
+./scripts/check-mobile.sh
+./scripts/check-protocol.sh
+./scripts/check-all.sh
+```
+
+See [docs/development.md](docs/development.md) for development and flash
+commands, [docs/hardware.md](docs/hardware.md) for prototype evidence,
+[docs/wiring.md](docs/wiring.md) to reproduce or transfer the circuit, and
+[docs/acceptance.md](docs/acceptance.md) for the offline-MVP capability audit.
+The oversized external WS2812 ring remains disconnected and deferred.

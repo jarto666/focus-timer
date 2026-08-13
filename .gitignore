@@ -1,5 +1,13 @@
 /target/
+/device/target/
 /.embuild/
+/device/.embuild/
+/device/crates/focus-firmware/.embuild/
 sdkconfig
 sdkconfig.old
-
+.DS_Store
+node_modules/
+.pnpm-store/
+.expo/
+dist/
+coverage/

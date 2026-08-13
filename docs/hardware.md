@@ -17,8 +17,8 @@ For rebuilding the breadboard after controller-header repair, use the dedicated
 - Native USB uses GPIO18 (`USB_D-`) and GPIO19 (`USB_D+`).
 - Onboard addressable RGB data uses GPIO8. It is a diagnostic only; GPIO8 is a
   strapping pin and is not allocated to an external peripheral.
-- Reviewed provisional GPIO allocation is recorded below. The buzzer output stays
-  conditional on its measured current and driver decision.
+- The final MVP GPIO allocation is recorded below. The active buzzer path was
+  accepted after its current-limiting and audible bench checks.
 
 The carrier matches the DevKitM-1 header layout and adds a second USB-C path.
 Header order below is top-to-bottom when the antenna is at the top and USB-C
@@ -80,10 +80,10 @@ scheduled event loop. The onboard GPIO8 RGB was not needed for bring-up.
 The delivered modules were photographed on 2026-08-08. The repository preserves
 the inspection evidence under [`docs/hardware-evidence`](hardware-evidence/).
 
-| Part | Observed marking and pin order | Prototype decision | Remaining bench fact |
+| Part | Observed marking and pin order | Final MVP decision | Bench result / follow-up |
 | --- | --- | --- | --- |
-| Display | 0.96-inch four-pin module; front order `GND`, `VDD`, `SCK`, `SDA`; rear marking `GM009605v43` and flex marking `E0960J-H30-A0` | Power `VDD` from 3.3 V; use `SCK` as I2C SCL and `SDA` as I2C SDA | address, pull-up values, orientation, readable output |
-| Encoder | EC11 module; rear order `5V`, `KEY`, `S2`, `S1`, `GND`; multiple `103` (10 kohm) parts and `C1`/`C2` are fitted | Despite the `5V` label, power this passive module from 3.3 V so its onboard pull-ups cannot drive ESP32 inputs above 3.3 V | direction and reliable detent/button behavior at 3.3 V |
+| Display | 0.96-inch four-pin module; front order `GND`, `VDD`, `SCK`, `SDA`; rear marking `GM009605v43` and flex marking `E0960J-H30-A0` | Power `VDD` from 3.3 V; use `SCK` as I2C SCL and `SDA` as I2C SDA | ACK at `0x3C`, upright and readable at desk distance with ESP32 internal pull-ups |
+| Encoder | EC11 module; rear order `5V`, `KEY`, `S2`, `S1`, `GND`; multiple `103` (10 kohm) parts and `C1`/`C2` are fitted | Despite the `5V` label, power this passive module from 3.3 V so its onboard pull-ups cannot drive ESP32 inputs above 3.3 V | both directions, slow/fast detents, short press, and long press bench-verified |
 | Buzzer | standalone 3 V 12 mm active buzzer packaging identifies polarity; the loose kit buzzer bodies have no legible current marking in the photograph | Use the standalone active buzzer from GPIO1 through 330 ohm, limiting worst-case pin current to about 10 mA; keep both kit alternatives disconnected | short Start and three-pulse Complete cadences physically confirmed at usable volume |
 | LED ring | purchased as 24-pixel WS2812 5 V ring; rear pads are `DI`, `5V`, `GND`, `DO` | Disconnect and store for reference; the diameter and reworked connections are unsuitable for this MVP | select a smaller replacement and review its mechanics, power, and data interface in v2 |
 | Breadboard power module | `HW-131`; USB-A and barrel inputs, switch, and independent `5V`/`OFF`/`3.3V` rail selectors | Not connected in this prototype | no characterization required unless a later power design proposes using it |
@@ -100,12 +100,11 @@ Evidence:
 - Buzzers and loose starter-kit parts:
   [inspection photograph](hardware-evidence/buzzers-and-components.jpg).
 
-The EC11 software starts with ESP32 internal pull-ups, a 25 ms switch debounce,
-and an 800 ms long-press
-threshold. Quadrature polling accepts only a complete four-transition Gray-code
-cycle returning to the boot-time detent. These are host-tested starting values,
-not final calibration: the physical module pin order, pull-ups, direction, and
-fast/slow detent reliability still require bench validation.
+The final EC11 software uses ESP32 internal pull-ups, a 25 ms switch debounce,
+an 800 ms long-press threshold, and 1 ms polling. Quadrature decoding accepts
+only a complete four-transition Gray-code cycle returning to the boot-time
+detent. Host tests and the physical slow/fast detent runs validate these values
+for the delivered module.
 
 The snapshot presentation model targets four fixed SSD1306 text bands at
 vertical positions 0, 13, 28, and 54. It labels the states `READY`, `FOCUS`,
@@ -165,13 +164,18 @@ external LED ring --------------------------- disconnected
 - Give every peripheral a common ground. Keep the breadboard's 5 V and 3.3 V
   rails visibly separate.
 
-Measure the active controller/OLED/encoder/buzzer assembly after the buzzer path
-is selected. The previous ring current estimates no longer contribute to the
-MVP power budget. A later ring version must establish a new adequately rated
-5 V topology and must not place HW-131 or a second 5 V supply in parallel with
-powered USB.
+The complete controller/OLED/encoder/buzzer assembly ran stably from both the
+computer USB port and a USB power bank. The buzzer branch is bounded to about
+10 mA by its 330 ohm series resistor; the passive encoder contributes only
+pull-up current, and the external ring is absent. No inline USB meter or ammeter
+trace was retained, so the repository does not claim a measured whole-device
+current. Until that number is captured, reproduce exactly this USB-only load,
+do not add peripherals, and treat current measurement as the final electrical
+handoff item before expanding the power topology. A later ring or battery
+version must establish a new adequately rated supply and must not parallel
+HW-131 or another 5 V source with powered USB.
 
-## Reviewed provisional wiring
+## Final MVP wiring
 
 | Function | Peripheral pin | Controller pin/rail | Notes |
 | --- | --- | --- | --- |
@@ -195,7 +199,7 @@ phase during the wire-swap bench test. GPIO10 and the carrier `5V out` are also
 unallocated. `74HC595` and `4N35` are not suitable future WS2812 data buffers;
 the replacement ring's interface will be reviewed from scratch.
 
-## Evidence still required
+## Bench evidence
 
 ### Archived WS2812 exploration — 2026-08-08
 
@@ -206,7 +210,7 @@ active MVP wiring or acceptance path; the ring is disconnected.
   pixel 0 at blue `4/255` with all pixels off every two seconds. Serial output
   matched the commanded phases, and the user visually confirmed the expected
   one-pixel result on the wired ring.
-- The successful first stage establishes the provisional direct
+- The successful first stage established the temporary direct
   `GPIO10 -> 330 ohm -> DI` path, common ground, and USB-derived `5V out` path
   at one-pixel load. It does not establish the final current budget or remove
   the requirement for local decoupling.
@@ -225,12 +229,9 @@ active MVP wiring or acceptance path; the ring is disconnected.
   output completed repeated cycles without a controller reset, and the user
   visually confirmed correct, stable operation. No `74AHCT125`-class buffer,
   larger bulk capacitor, or alternate 5 V distribution is required for this
-  short-wire, USB-powered prototype at the 32/255 channel cap. This conclusion
-  does not approve full-brightness white or remove the final current-measurement
-  evidence item.
-
-- Record commands, serial logs, measurements, and visible results for each
-  peripheral test before the provisional wiring becomes final.
+  short-wire, USB-powered experiment at the 32/255 channel cap. This conclusion
+  does not approve full-brightness white and does not make the ring part of the
+  final MVP wiring.
 
 ### Active-buzzer staged bring-up — 2026-08-12
 
@@ -290,8 +291,9 @@ active MVP wiring or acceptance path; the ring is disconnected.
   cycles showed `READY`, `FOCUS`, `PAUSED`, and `COMPLETE` without clipping, and
   the user confirmed readability at normal desk distance.
 - The direct Dupont/header connection is mechanically fragile and can lose I2C
-  contact when disturbed. This does not change the electrical map, but it must
-  be stabilized before final UX acceptance.
+  contact when disturbed. This does not change the accepted electrical map; the
+  perfboard transfer must replace this temporary contact with inspected soldered
+  joints or sockets and repeat the staged smoke test.
 - The default integrated runtime then drove the same OLED from live EC11/core
   snapshots. Serial and visual evidence confirmed immediate preset/state
   changes and `90:00`, `89:59`, `89:58`, `89:57` countdown frames on visible
@@ -325,8 +327,18 @@ active MVP wiring or acceptance path; the ring is disconnected.
   to Ready with the full `00:08` duration.
 - A separate run produced `Press -> Running`, then one `LongPress` event and an
   immediate Ready frame with `00:08`, without a confirmation state or an extra
-  short-press event. This completes the on-device evidence for task 6.2; the
-  separate 15-, 25-, and 90-minute accuracy runs remain task 6.3.
+  short-press event. This completes the on-device evidence for task 6.2.
+
+### Production-duration accuracy acceptance — 2026-08-13
+
+- The user explicitly accepted the uninterrupted Quick Sprint (15 minutes),
+  Pomodoro (25 minutes), and Deep Work (90 minutes) runs as measured against a
+  reference clock and within the one-second completion-error gate.
+- Raw timestamp traces were not preserved, so this is recorded as
+  user-attested bench evidence rather than a reproducible automated timing log.
+  The monotonic-deadline implementation and host time-jump tests remain the
+  reproducible evidence for the underlying accounting model. This satisfies
+  task 6.3 for the breadboard MVP.
 
 ### Power-cycle recovery acceptance — 2026-08-13
 
@@ -372,3 +384,21 @@ active MVP wiring or acceptance path; the ring is disconnected.
 - The user confirmed the entire sequence operated correctly before reconnecting
   the device to the development computer. This is the physical evidence for
   task 6.4; the firmware contains no Wi-Fi or Bluetooth setup path.
+
+### Monorepo path-migration smoke — 2026-08-14
+
+- The default production firmware built from the canonical
+  `device/crates/focus-firmware` path was flashed to the existing ESP32-C3 after
+  the Cargo workspace move. The device booted normally, restored its selected
+  preset from NVS, initialized OLED, EC11, and active buzzer, and rendered
+  `READY`.
+- Using the default build, the user selected a preset, started a session,
+  paused, resumed, long-pressed to cancel, and power-cycled the controller. It
+  returned to `READY` with the selected preset preserved.
+- The path-migrated `acceptance-diagnostic` build then completed an 8-second
+  session naturally, rendered `COMPLETED`, emitted the audible three-pulse
+  completion cadence, and returned to `READY` after dismissal.
+- The default production build was rebuilt and flashed last. Its verified boot
+  log loaded the settings record and rendered
+  `READY / Quick Sprint / 15:00`. No protocol, BLE, GPIO, settings-schema, or
+  timer-behavior change was present during this migration gate.

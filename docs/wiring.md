@@ -25,8 +25,8 @@ flowchart LR
     V3 -->|"VDD"| OLED["SSD1306 OLED, 128x64"]
     GND -->|"GND"| OLED
 
-    ESP -.->|"GPIO1 diagnostic -> 330 ohm -> +"| BUZZ["3 V standalone active buzzer"]
-    GND -.->|"-"| BUZZ
+    ESP -->|"GPIO1 -> 330 ohm -> +"| BUZZ["3 V standalone active buzzer"]
+    GND -->|"-"| BUZZ
     RING["24-pixel WS2812 ring"] -.->|"Disconnected and deferred to v2"| STORAGE["Store separately"]
     OFF["HW-131 power module"] -.->|"Keep disconnected while USB powers the board"| ESP
 ```
@@ -96,9 +96,39 @@ GND                                 GND
    encoder direction/button diagnostic.
 5. Leave the external LED ring, its capacitors, GPIO10, and `5V out`
    disconnected. They are not part of the MVP reconstruction.
-6. For the buzzer diagnostic only, leave USB disconnected, insert one 330 ohm
-   resistor between GPIO1 and the standalone active buzzer's marked `+`, then
-   connect its `-` to common GND. Keep HW-131 disconnected.
+6. Disconnect USB, insert one 330 ohm resistor between GPIO1 and the standalone
+   active buzzer's marked `+`, then connect its `-` to common GND. Reconnect USB
+   and confirm both Start and Complete cadences. Keep HW-131 disconnected.
+
+## Transfer to soldered perfboard
+
+The validated circuit can be transferred without changing its electrical
+topology. The transfer is a mechanical rebuild, not an opportunity to add the
+deferred ring, battery input, HW-131, or a second power source.
+
+1. Prefer sockets or female headers for the controller and OLED so both remain
+   replaceable. Keep the antenna edge clear and both USB-C connectors accessible.
+2. Create one labelled `3V3` rail and one common `GND` rail. Do not create or
+   connect a 5 V peripheral rail for this MVP.
+3. Keep GPIO6/SCK and GPIO7/SDA short, routed together, and away from the buzzer
+   branch. Mechanically support the OLED connector so no force reaches its four
+   solder joints.
+4. Place the 330 ohm resistor in series close to GPIO1 or the buzzer connector;
+   preserve buzzer polarity.
+5. Before applying USB power, inspect both sides under good light and verify
+   continuity for every row in the pin-to-pin table. Verify there is no short
+   between `3V3` and `GND`, no bridge between adjacent controller pins, and no
+   connection to `5V in`, `5V out`, GPIO10, GPIO18, or GPIO19.
+6. Power up in the same stages used on the breadboard: controller alone, OLED,
+   encoder, then buzzer. Stop immediately on heat, resets, unstable display, or
+   unexpected buzzer activation.
+7. Flash the default production build and repeat selection, short press, pause,
+   resume, long-press cancel, completion feedback, reboot-to-Idle, and NVS
+   restore. The perfboard assembly is accepted only after this smoke test.
+
+The whole-device USB current was not captured with an inline meter. Keep the
+load identical during transfer; measure it before adding a battery system,
+addressable LEDs, or any other peripheral.
 
 ## Validation status
 
@@ -108,8 +138,8 @@ GND                                 GND
   acceptance. A smaller replacement will receive a fresh power/signal review.
 - OLED: `0x3C` ACK at 100 kHz with ESP32-C3 internal 3.3 V pull-ups; upright
   `READY`, `FOCUS`, `PAUSED`, and `COMPLETE` frames repeatedly cycled and were
-  readable at desk distance. The loose Dupont/header contact remains a
-  mechanical risk to stabilize before final UX acceptance.
+  readable at desk distance. The loose Dupont/header contact is the primary
+  mechanical defect the soldered transfer must eliminate.
 - Buzzer: the standalone 3 V active buzzer on GPIO1 through 330 ohm produced the
   short Start and three-pulse Complete cadences at usable volume. The direct,
   current-limited path is accepted for the prototype; no transistor is required.

@@ -32,9 +32,17 @@ source /Users/ellion/export-esp.sh
 
 ## Host checks
 
-Validated on 2026-08-08 with host Rust/Cargo 1.97.1:
+Run the complete device host suite from the repository root:
 
 ```sh
+./scripts/check-device.sh
+```
+
+The script runs these commands from `device/`. The final pre-move checkpoint
+was repeated on 2026-08-14 with host Rust/Cargo 1.97.1:
+
+```sh
+cd device
 cargo fmt --all --check
 cargo clippy -p focus-core --all-targets -- -D warnings
 cargo test -p focus-core
@@ -44,12 +52,44 @@ cargo test -p focus-firmware --no-default-features \
   --target aarch64-apple-darwin
 ```
 
-Checkpoint result: formatting clean, Clippy clean with warnings denied, 20 core
-behavior tests, 3 buzzer-cadence tests, 9 firmware-adapter input tests,
-5 presentation tests, 8 settings adapter/core-boundary tests, and doc-tests
-passing. The
-explicit host target and disabled ESP-IDF feature let the same EC11 decoder be
-tested on macOS while its default build remains the ESP32-C3 firmware.
+Checkpoint result: formatting clean, both Clippy invocations clean with warnings
+denied, 20 core behavior tests, 3 buzzer-cadence tests, 9 firmware-adapter input
+tests, 5 presentation tests, 8 settings adapter/core-boundary tests, and all
+doc-tests passing. That is 45 named tests with zero failures. The explicit host
+target and disabled ESP-IDF feature let the same EC11 decoder be tested on macOS
+while its default build remains the ESP32-C3 firmware. Capability-level mapping
+is recorded in `docs/acceptance.md`.
+
+### Pre-monorepo device checkpoint
+
+The device workspace was checkpointed immediately before its move under
+`device/` on 2026-08-14. The existing host suite above passed unchanged: 20
+`focus-core` behavior tests and 25 `focus-firmware` adapter tests, with both
+Clippy runs warning-free and formatting clean. The default ESP32-C3 firmware
+also built successfully with ESP-IDF v5.5.3, host Rust/Cargo 1.97.1, ESP Rust
+1.95.0-nightly (2026-04-15), and espflash 4.5.0.
+
+The pre-move debug ELF was 16,688,968 bytes with SHA-256
+`ca8bd30966dc565cb2850645185e699e516b21ff03dda929fbd0db6b5176af49`.
+This is a reproducibility checkpoint, not a flash-size measurement. The
+independent `build-focus-device-mvp` change deliberately remains at 39/40:
+its whole-device USB-current measurement in task 8.1 is still open.
+
+### Path-migration checkpoint
+
+After moving the Rust workspace to `device/` on 2026-08-14,
+`./scripts/check-device.sh` passed the same 45 named tests, formatting, both
+warning-denied Clippy runs, and all doc-tests. A clean default ESP32-C3 build
+then passed from `device/crates/focus-firmware`, followed by successful builds
+of `ring-diagnostic`, `ring-full-diagnostic`, `ring-capped-diagnostic`,
+`encoder-diagnostic`, `oled-diagnostic`, `buzzer-diagnostic`,
+`acceptance-diagnostic`, `settings-clear-diagnostic`, and
+`settings-corrupt-diagnostic`. The default firmware was rebuilt last.
+
+The post-move debug ELF is 16,689,056 bytes with SHA-256
+`90fbe07ac7be200ed62a76c8bab2818781a309265f716b8691fd2d46c7d2aff6`.
+Its debug-path-dependent hash and size are recorded as the new canonical build
+checkpoint; they are not a flash-size or USB-current measurement.
 
 ## Firmware commands
 
@@ -57,8 +97,11 @@ Run firmware commands from the firmware crate so its target configuration and
 linked `esp` toolchain are selected automatically:
 
 ```sh
-# Build (from crates/focus-firmware)
-cd crates/focus-firmware
+# Build from the repository root
+./scripts/build-firmware.sh
+
+# Build (from device/crates/focus-firmware)
+cd device/crates/focus-firmware
 cargo build
 
 # Inspect a connected board
@@ -77,8 +120,8 @@ evidence is recorded in `docs/hardware.md`.
 ## Diagnostic firmware layout
 
 Alternative hardware-test entrypoints live under
-`crates/focus-firmware/src/diagnostics/`. Each diagnostic feature still builds
-the complete `focus-firmware` executable, but compile-time `cfg` selection makes
+`device/crates/focus-firmware/src/diagnostics/`. Each diagnostic feature still
+builds the complete `focus-firmware` executable, but compile-time `cfg` selection makes
 `main` enter exactly one diagnostic run loop instead of the production event
 loop. Concrete modes select the internal `diagnostic-firmware` aggregate
 transitively, so `main.rs` only needs one production-versus-diagnostic switch.
@@ -108,7 +151,7 @@ path has passed task 5.4.
 Build the diagnostic while the ring's 5 V wire remains disconnected:
 
 ```sh
-cd crates/focus-firmware
+cd device/crates/focus-firmware
 cargo build --features ring-diagnostic
 espflash flash --port /dev/cu.usbmodem101 --before usb-reset \
   ../../target/riscv32imc-esp-espidf/debug/focus-firmware
@@ -130,7 +173,7 @@ Only after the one-pixel cycle is visually confirmed, build and flash the
 second stage:
 
 ```sh
-cd crates/focus-firmware
+cd device/crates/focus-firmware
 cargo build --features ring-full-diagnostic
 espflash flash --port /dev/cu.usbmodem101 --before usb-reset \
   ../../target/riscv32imc-esp-espidf/debug/focus-firmware
@@ -149,7 +192,7 @@ After both low-current stages pass and the local 100 uF electrolytic plus
 GND, test the actual application channel cap:
 
 ```sh
-cd crates/focus-firmware
+cd device/crates/focus-firmware
 cargo build --features ring-capped-diagnostic
 espflash flash --port /dev/cu.usbmodem101 --before usb-reset \
   ../../target/riscv32imc-esp-espidf/debug/focus-firmware
@@ -183,7 +226,7 @@ Disconnect USB and ring 5 V before changing wiring. Connect EC11 `5V` to `3V3`,
 flash, and monitor:
 
 ```sh
-cd crates/focus-firmware
+cd device/crates/focus-firmware
 cargo build --features encoder-diagnostic
 espflash flash --port /dev/cu.usbmodem101 --before usb-reset \
   ../../target/riscv32imc-esp-espidf/debug/focus-firmware
@@ -219,7 +262,7 @@ Build before powering the newly wired display, then flash and monitor through
 the controller's native `USB` connector:
 
 ```sh
-cd crates/focus-firmware
+cd device/crates/focus-firmware
 cargo build --features oled-diagnostic
 espflash flash --port /dev/cu.usbmodem101 --before usb-reset \
   ../../target/riscv32imc-esp-espidf/debug/focus-firmware
@@ -249,7 +292,7 @@ ring.
 Build and flash the default runtime without a diagnostic feature:
 
 ```sh
-cd crates/focus-firmware
+cd device/crates/focus-firmware
 cargo build
 espflash flash --port /dev/cu.usbmodem101 --before usb-reset \
   ../../target/riscv32imc-esp-espidf/debug/focus-firmware
@@ -266,7 +309,7 @@ complete on-device lifecycle without waiting for a 15-minute completion; it is
 not evidence for the duration-accuracy measurements in task 6.3.
 
 ```sh
-cd crates/focus-firmware
+cd device/crates/focus-firmware
 cargo build --features acceptance-diagnostic
 espflash flash --port /dev/cu.usbmodem101 --before usb-reset \
   ../../target/riscv32imc-esp-espidf/debug/focus-firmware
@@ -300,7 +343,8 @@ The host settings suite covers successful restore, missing first-boot data,
 corrupt bytes, unsupported schema version, a removed preset identifier,
 coalescing, unchanged-selection write avoidance, and a simulated commit
 failure that cannot revert selection or prevent session start. Hardware NVS
-restore and fallback validation are tracked separately by task 7.4.
+restore, clear, corrupt fallback, and fallback-session-start paths passed on
+2026-08-13; see `docs/hardware.md`.
 
 ## Active-buzzer diagnostic
 
@@ -316,7 +360,7 @@ to approximately `3.3 V / 330 ohm = 10 mA`. Do not substitute the passive
 buzzer and do not reduce the resistor if the result is quiet.
 
 ```sh
-cd crates/focus-firmware
+cd device/crates/focus-firmware
 cargo build --features buzzer-diagnostic
 espflash flash --port /dev/cu.usbmodem101 --before usb-reset \
   ../../target/riscv32imc-esp-espidf/debug/focus-firmware

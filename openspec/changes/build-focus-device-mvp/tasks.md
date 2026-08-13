@@ -4,7 +4,7 @@
 - [x] 1.2 Record the purchased interaction hardware and starter-kit inventory, including the SSD1306 OLED, EC11, standalone and kit active buzzers, passive buzzer, 24-pixel WS2812 ring, optional breadboard power module, wiring/headers, 100 nF/10 uF/100 uF capacitors, resistor values, buttons/LEDs, `74HC595`, and `4N35`; verify actual module pin orders and markings.
 - [x] 1.3 Confirm USB as the initial controller power input, identify the board's 5 V/VBUS path and current constraints, inspect the optional power module's model/current/backfeed behavior, and define a single-source breadboard power budget with common ground and no unreviewed parallel supplies.
 - [x] 1.4 Define and review the active MVP GPIO/wiring diagram covering 3.3 V OLED and EC11 signals, buzzer load/driver decision, USB power and common ground, boot-strapping constraints, and avoidance of the onboard RGB/USB/serial pins; explicitly show the external WS2812 ring as disconnected/deferred and acquire extra buzzer drive/protection parts only when inspection or testing proves they are required.
-- [x] 1.5 Create the Cargo workspace with `crates/focus-core` and `crates/focus-firmware`, keeping the core free of ESP32 dependencies and compatible with `no_std`.
+- [x] 1.5 Create the Cargo workspace, now located at `device/crates/focus-core` and `device/crates/focus-firmware`, keeping the core free of ESP32 dependencies and compatible with `no_std`.
 - [x] 1.6 Add repository documentation placeholders for the exact Rust toolchain, target, ESP-IDF version, dependency versions, host test, build, flash, and serial-monitor commands so each is filled by its proving task.
 
 ## 2. Host-Tested Core Behavior
@@ -44,7 +44,7 @@
 
 - [x] 6.1 Connect semantic input, scheduled time events, core snapshots/effects, OLED rendering, buzzer playback, and serial diagnostics through the single state-owning event loop, with no external LED-ring dependency.
 - [x] 6.2 Verify on-device selection, wraparound, one-press start, pause, resume, long-press cancel without confirmation, completion, completion dismissal, and ignored rotation during an active session.
-- [ ] 6.3 Measure uninterrupted 15-, 25-, and 90-minute sessions against a reference clock and record that active-duration completion error is at most one second.
+- [x] 6.3 Measure uninterrupted 15-, 25-, and 90-minute sessions against a reference clock and record that active-duration completion error is at most one second.
 - [x] 6.4 Verify the complete session lifecycle after boot with radios unprovisioned and no phone, computer companion, network, cloud service, or wall-clock source present.
 - [x] 6.5 Power-cycle the device from Running and Paused states and verify it returns safely to Idle without restoring an active session.
 
@@ -58,6 +58,6 @@
 ## 8. Acceptance and Handoff
 
 - [ ] 8.1 Finalize the hardware and developer documentation with exact board/module markings, starter-kit inventory disposition, USB/VBUS and optional power-module decision, GPIO table, OLED/encoder/buzzer wiring, explicit external-ring deferral, measured active-MVP power budget, any conditionally added buzzer interface/protection parts, thresholds, pinned versions, and tested build/test/flash/monitor commands.
-- [ ] 8.2 Run the full host test suite and capture a concise passing summary tied to the four capability specs.
-- [ ] 8.3 Run the breadboard UX checklist for encoder access and reliability, start within five seconds without documentation, paused-state clarity, long-press discoverability, OLED readability, and completion volume; record the oversized external ring as deferred rather than requiring a temporary mechanical mockup.
-- [ ] 8.4 Audit the prototype against every scenario in `preset-selection`, `focus-session`, `device-interface`, and `device-settings`; record evidence or an explicit follow-up for any unmet scenario before archiving the change.
+- [x] 8.2 Run the full host test suite and capture a concise passing summary tied to the four capability specs.
+- [x] 8.3 Run the breadboard UX checklist for encoder access and reliability, start within five seconds without documentation, paused-state clarity, long-press discoverability, OLED readability, and completion volume; record the oversized external ring as deferred rather than requiring a temporary mechanical mockup.
+- [x] 8.4 Audit the prototype against every scenario in `preset-selection`, `focus-session`, `device-interface`, and `device-settings`; record evidence or an explicit follow-up for any unmet scenario before archiving the change.
