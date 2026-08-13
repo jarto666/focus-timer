@@ -340,6 +340,26 @@ active MVP wiring or acceptance path; the ring is disconnected.
 - Active-session state is therefore confirmed volatile and both Running and
   Paused power-loss cases return safely to Idle, satisfying task 6.5.
 
+### Persistent-selection and fallback acceptance — 2026-08-13
+
+- The user selected Reading and allowed the one-second quiet period to expire.
+  After reset, production firmware logged that the settings record was loaded
+  from NVS and rendered `READY / Reading / 45:00`, confirming successful save
+  and restore by stable preset identifier.
+- The `settings-clear-diagnostic` firmware removed the settings record. On the
+  next production boot, the missing-record path selected the documented default
+  and rendered `READY / Pomodoro / 25:00`; normal short-press starts remained
+  available through the same production event loop.
+- The `settings-corrupt-diagnostic` firmware then wrote an invalid record. The
+  next production boot reported `Decode(BadMagic)` and
+  `SettingsFallback(Corrupt)`, selected Pomodoro, and rendered
+  `READY / Pomodoro / 25:00` without blocking startup.
+- From that corrupt-record fallback, the user short-pressed the encoder and
+  confirmed `FOCUS / Pomodoro`, a decreasing countdown, and the Start buzzer
+  pulse. A subsequent long press returned the device to `READY`. Saved, missing,
+  and corrupt settings therefore all preserve a usable session-start path,
+  satisfying task 7.4.
+
 ### Offline lifecycle acceptance — 2026-08-13
 
 - The 8-second integrated acceptance build was disconnected from the development

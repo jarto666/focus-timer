@@ -53,7 +53,7 @@
 - [x] 7.1 Implement the version-1 non-volatile settings adapter containing only the schema version and selected preset identifier.
 - [x] 7.2 Coalesce selection saves after a quiet period, avoid writes when the identifier is unchanged, and preserve the in-memory selection when a write fails.
 - [x] 7.3 Add adapter/core boundary tests for successful restore, first boot, corrupt bytes, unsupported version, removed preset, and simulated write failure.
-- [ ] 7.4 Validate on hardware that a saved selection survives reboot, erased/corrupt settings fall back to the documented default, and every fallback still permits a session to start.
+- [x] 7.4 Validate on hardware that a saved selection survives reboot, erased/corrupt settings fall back to the documented default, and every fallback still permits a session to start.
 
 ## 8. Acceptance and Handoff
 
