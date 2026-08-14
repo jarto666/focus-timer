@@ -15,6 +15,7 @@ export {
   MockDeviceTransport,
   type MockRequestResponder,
 } from './mock-transport';
+export { createProtocolMockTransport, createProtocolResponder } from './protocol-responder';
 export {
   getMockScenario,
   mockScenarioIds,

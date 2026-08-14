@@ -5,7 +5,7 @@ export type DeviceStatusModel = Readonly<{
   presetName: string;
   plannedDurationMs: number;
   remainingDurationMs: number;
-  viewState: 'idle';
+  viewState: 'idle' | 'running' | 'paused' | 'completed';
   clockKnown: boolean;
 }>;
 
@@ -34,6 +34,10 @@ export const emptyHistory: LocalHistoryModel = {
   journalEpoch: null,
 };
 
+export type HistorySyncState =
+  | Readonly<{ phase: 'loading' | 'syncing' | 'ready' }>
+  | Readonly<{ phase: 'failed'; message: string }>;
+
 export type DevelopmentScenarioOption = Readonly<{
   id: MockScenarioId;
   label: string;
@@ -43,6 +47,7 @@ export type CompanionRuntime = Readonly<{
   connection: DeviceConnectionState;
   status: DeviceStatusModel | null;
   history: LocalHistoryModel;
+  historySync: HistorySyncState;
   selectedScenario: MockScenarioId;
   developmentScenarios: readonly DevelopmentScenarioOption[];
   startScan(): Promise<void>;

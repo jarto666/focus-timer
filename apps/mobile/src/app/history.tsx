@@ -75,7 +75,7 @@ function SessionCard({ entry }: Readonly<{ entry: LocalHistoryEntry }>) {
 }
 
 export default function HistoryScreen() {
-  const { history } = useCompanionRuntime();
+  const { history, historySync } = useCompanionRuntime();
   const totalActiveMs = history.entries.reduce((total, entry) => total + entry.activeDurationMs, 0);
   const incompleteCopy = completenessCopy(history.completeness);
 
@@ -102,6 +102,30 @@ export default function HistoryScreen() {
           <Text style={styles.summaryLabel}>RECORDED FOCUS</Text>
         </View>
       </View>
+
+      {historySync.phase === 'loading' || historySync.phase === 'syncing' ? (
+        <View style={styles.syncNotice}>
+          <View style={styles.syncPulse} />
+          <View style={styles.syncCopy}>
+            <Text style={styles.syncTitle}>
+              {historySync.phase === 'loading' ? 'OPENING LOCAL LEDGER' : 'SYNCING DEVICE PAGES'}
+            </Text>
+            <Text style={styles.syncBody}>
+              Existing entries remain readable while the next durable cursor is prepared.
+            </Text>
+          </View>
+        </View>
+      ) : null}
+
+      {historySync.phase === 'failed' ? (
+        <View style={styles.failedNotice}>
+          <Text style={styles.failedCode}>SYNC INTERRUPTED</Text>
+          <Text style={styles.failedBody}>{historySync.message}</Text>
+          <Text style={styles.failedFoot}>
+            Saved pages are intact. Retry from the device screen.
+          </Text>
+        </View>
+      ) : null}
 
       {incompleteCopy === null ? null : (
         <View style={styles.incompleteNotice}>
@@ -139,7 +163,7 @@ export default function HistoryScreen() {
           tintColor={color.faintText}
         />
         <Text style={styles.privacyText}>
-          Development preview · durable on-device storage comes in the persistence milestone.
+          Durable on-device SQLite · no account · no cloud recovery
         </Text>
       </View>
     </Page>
@@ -195,6 +219,40 @@ const styles = StyleSheet.create({
     marginTop: space.md,
     padding: space.md,
   },
+  syncNotice: {
+    alignItems: 'center',
+    backgroundColor: color.surface,
+    borderColor: color.line,
+    borderRadius: radius.card,
+    borderWidth: 1,
+    flexDirection: 'row',
+    marginTop: space.md,
+    padding: space.md,
+  },
+  syncPulse: {
+    backgroundColor: color.accent,
+    borderRadius: 5,
+    height: 10,
+    marginRight: 12,
+    shadowColor: color.accent,
+    shadowOpacity: 0.8,
+    shadowRadius: 8,
+    width: 10,
+  },
+  syncCopy: { flex: 1 },
+  syncTitle: { color: color.accent, fontSize: 9, fontWeight: '800', letterSpacing: 1.3 },
+  syncBody: { color: color.mutedText, fontSize: 12, lineHeight: 17, marginTop: 5 },
+  failedNotice: {
+    backgroundColor: color.backgroundLifted,
+    borderColor: color.faintText,
+    borderRadius: radius.card,
+    borderWidth: 1,
+    marginTop: space.md,
+    padding: space.md,
+  },
+  failedCode: { color: color.text, fontSize: 9, fontWeight: '800', letterSpacing: 1.4 },
+  failedBody: { color: color.mutedText, fontSize: 12, lineHeight: 18, marginTop: 7 },
+  failedFoot: { color: color.faintText, fontSize: 10, lineHeight: 15, marginTop: 7 },
   incompleteCode: { color: color.accent, fontSize: 9, fontWeight: '800', letterSpacing: 1.5 },
   incompleteBody: { color: color.mutedText, fontSize: 12, lineHeight: 18, marginTop: 7 },
   sectionLabel: {

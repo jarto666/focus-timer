@@ -57,12 +57,12 @@
 
 ## 7. Implement Local Mobile Persistence and Synchronization
 
-- [ ] 7.1 Add the local SQLite schema and migrations for known devices, journal epochs/cursors, gap metadata, and session records keyed by `(device_id, journal_epoch, sequence)` with nullable session timestamps.
-- [ ] 7.2 Implement and test repositories that atomically upsert one page, record its gap state, and advance the matching cursor only in the same successful transaction.
-- [ ] 7.3 Implement `DeviceClient` handshake, status, clock-anchor, page, compatibility, timeout, and correlated-error APIs on top of `DeviceTransport`.
-- [ ] 7.4 Implement the foreground sync state machine that handles empty/current history, multiple pages, duplicate pages, disconnect mid-sync, local commit failure, stale cursor, and changed journal epoch.
-- [ ] 7.5 Run the complete persistence and sync suite against the deterministic mock, proving idempotence, retry from the last committed position, offline history, and no fabricated timestamp or cloud recovery.
-- [ ] 7.6 Connect device setup/status and history screens to the SQLite-backed application models with explicit empty, syncing, unavailable, incompatible, incomplete, failed, retry, completed, cancelled, and untimestamped states.
+- [x] 7.1 Add the local SQLite schema and migrations for known devices, journal epochs/cursors, gap metadata, and session records keyed by `(device_id, journal_epoch, sequence)` with nullable session timestamps.
+- [x] 7.2 Implement and test repositories that atomically upsert one page, record its gap state, and advance the matching cursor only in the same successful transaction.
+- [x] 7.3 Implement `DeviceClient` handshake, status, clock-anchor, page, compatibility, timeout, and correlated-error APIs on top of `DeviceTransport`.
+- [x] 7.4 Implement the foreground sync state machine that handles empty/current history, multiple pages, duplicate pages, disconnect mid-sync, local commit failure, stale cursor, and changed journal epoch.
+- [x] 7.5 Run the complete persistence and sync suite against the deterministic mock, proving idempotence, retry from the last committed position, offline history, and no fabricated timestamp or cloud recovery.
+- [x] 7.6 Connect device setup/status and history screens to the SQLite-backed application models with explicit empty, syncing, unavailable, incompatible, incomplete, failed, retry, completed, cancelled, and untimestamped states.
 
 ## 8. Connect the Physical iPhone over BLE
 

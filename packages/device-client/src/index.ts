@@ -1,5 +1,23 @@
 export const deviceClientPackageName = '@focus-timer/device-client';
 
+export { DeviceClient, DeviceClientError, type DeviceClientErrorCode } from './device-client';
+export {
+  ForegroundSyncError,
+  synchronizeForeground,
+  type ForegroundSyncResult,
+} from './foreground-sync';
+export {
+  bytesToHex,
+  hexToBytes,
+  nextCursorAfterSequence,
+  type HistoryCompleteness,
+  type JournalCursor,
+  type KnownDeviceRecord,
+  type PageCommit,
+  type SessionRepository,
+  type StoredSessionRecord,
+} from './session-repository';
+
 export {
   connectionActionsFor,
   connectionPhases,

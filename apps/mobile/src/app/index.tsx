@@ -104,6 +104,7 @@ export default function HomeScreen() {
   const { connection, history, status } = useCompanionRuntime();
   const copy = connectionCopy(connection.phase);
   const ready = connection.phase === 'ready';
+  const dialLabel = status?.viewState.toUpperCase() ?? copy.dial;
   const entryCount = String(history.entries.length).padStart(2, '0');
 
   return (
@@ -134,7 +135,7 @@ export default function HomeScreen() {
           accessible
           accessibilityLabel={
             status === null
-              ? `Timer ${copy.dial.toLowerCase()}`
+              ? `Timer ${dialLabel.toLowerCase()}`
               : `${status.presetName}, ${formatTimer(status.remainingDurationMs)} remaining`
           }
           style={styles.dialStage}
@@ -150,7 +151,7 @@ export default function HomeScreen() {
               <Text style={styles.time}>
                 {status === null ? '--:--' : formatTimer(status.remainingDurationMs)}
               </Text>
-              <Text style={styles.dialLabel}>{copy.dial}</Text>
+              <Text style={styles.dialLabel}>{dialLabel}</Text>
             </View>
           </View>
         </View>

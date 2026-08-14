@@ -10,37 +10,42 @@ import {
 } from 'react';
 
 import {
+  DeviceClientError,
   DeviceTransportError,
+  synchronizeForeground,
   type DeviceCandidate,
   type DeviceConnectionState,
   type ReadyDevice,
 } from '@focus-timer/device-client';
+import { SessionOutcome, ViewState } from '@focus-timer/device-protocol';
 import {
-  createMockDevice,
-  createMockTransport,
+  createProtocolMockTransport,
   getMockScenario,
-  type DeterministicMockDevice,
   type MockDeviceTransport,
   type MockScenario,
   type MockScenarioId,
 } from '@focus-timer/mock-device';
 
 import { runtimeConfig } from '@/config/runtime';
+import {
+  openSessionRepository,
+  type SqliteSessionRepository,
+} from '@/storage/sqlite-session-repository';
 
 import {
   type CompanionRuntime,
   type DevelopmentScenarioOption,
+  type DeviceStatusModel,
+  type LocalHistoryModel,
   emptyHistory,
 } from './companion-model';
-import { synchronizeMockHistory } from './mock-sync';
 
 type MockBackend = Readonly<{
   scenario: MockScenario;
-  device: DeterministicMockDevice;
   transport: MockDeviceTransport;
 }>;
 
-const operation = { timeoutMs: 1_000 } as const;
+const operation = { timeoutMs: 5_000 } as const;
 
 const scenarioLabels: Record<MockScenarioId, string> = {
   empty: 'Empty',
@@ -61,16 +66,9 @@ const developmentScenarios: readonly DevelopmentScenarioOption[] = Object.entrie
 const RuntimeContext = createContext<CompanionRuntime | null>(null);
 
 function createBackend(scenarioId: MockScenarioId): MockBackend | null {
-  if (runtimeConfig.deviceBackend !== 'mock') {
-    return null;
-  }
-
+  if (runtimeConfig.deviceBackend !== 'mock') return null;
   const scenario = getMockScenario(scenarioId);
-  return {
-    scenario,
-    device: createMockDevice(scenario),
-    transport: createMockTransport(scenario),
-  };
+  return { scenario, transport: createProtocolMockTransport(scenario) };
 }
 
 function initialConnection(backend: MockBackend | null): DeviceConnectionState {
@@ -89,21 +87,67 @@ function retryableState(
     'transport-failed';
 
   if (error instanceof DeviceTransportError) {
-    if (error.code === 'connection-lost') {
-      code = 'connection-lost';
-    } else if (error.code === 'request-timeout') {
-      code = 'request-timeout';
-    } else if (operationName === 'scan') {
-      code = 'scan-failed';
-    } else if (operationName === 'connect') {
-      code = 'connect-failed';
-    }
+    if (error.code === 'connection-lost') code = 'connection-lost';
+    else if (error.code === 'request-timeout') code = 'request-timeout';
+    else if (operationName === 'scan') code = 'scan-failed';
+    else if (operationName === 'connect') code = 'connect-failed';
   }
 
   return {
     phase: 'retryable-error',
     candidate,
     error: { code, operation: operationName, message },
+  };
+}
+
+function readyDevice(device: Awaited<ReturnType<SqliteSessionRepository['loadMostRecentDevice']>>) {
+  if (device === null) return null;
+  return {
+    deviceId: device.deviceId,
+    transportId: device.transportId,
+    productName: device.productName,
+    firmwareVersion: device.firmwareVersion,
+    protocolVersion: device.protocolVersion,
+  } satisfies ReadyDevice;
+}
+
+function statusModel(status: Awaited<ReturnType<typeof synchronizeForeground>>['status']) {
+  const states: Record<ViewState, DeviceStatusModel['viewState']> = {
+    [ViewState.Idle]: 'idle',
+    [ViewState.Running]: 'running',
+    [ViewState.Paused]: 'paused',
+    [ViewState.Completed]: 'completed',
+  };
+  return {
+    presetName: status.preset.name,
+    plannedDurationMs: status.preset.plannedDurationMs,
+    remainingDurationMs: status.remainingDurationMs,
+    viewState: states[status.viewState],
+    clockKnown: status.clockKnown,
+  } satisfies DeviceStatusModel;
+}
+
+async function loadHistory(
+  repository: SqliteSessionRepository,
+  deviceId: string,
+): Promise<LocalHistoryModel> {
+  const [cursor, sessions] = await Promise.all([
+    repository.loadActiveCursor(deviceId),
+    repository.listSessions(deviceId),
+  ]);
+  return {
+    entries: sessions.map(({ journalEpoch, record }) => ({
+      key: `${journalEpoch}:${record.sequence}`,
+      sequence: record.sequence,
+      presetName: record.preset.name,
+      plannedDurationMs: record.preset.plannedDurationMs,
+      activeDurationMs: record.activeDurationMs,
+      outcome: record.outcome === SessionOutcome.Completed ? 'completed' : 'cancelled',
+      startedAtUtcMs: record.startedAtUtcMs ?? null,
+      endedAtUtcMs: record.endedAtUtcMs ?? null,
+    })),
+    completeness: cursor?.completeness ?? 'complete',
+    journalEpoch: cursor?.journalEpoch ?? null,
   };
 }
 
@@ -117,18 +161,46 @@ export function RuntimeProvider({ children }: PropsWithChildren) {
   );
   const [status, setStatus] = useState<CompanionRuntime['status']>(null);
   const [history, setHistory] = useState(emptyHistory);
-  const readyDevice = useRef<ReadyDevice | null>(null);
+  const [historySync, setHistorySync] = useState<CompanionRuntime['historySync']>({
+    phase: 'loading',
+  });
+  const repository = useRef<SqliteSessionRepository | null>(null);
+  const currentDevice = useRef<ReadyDevice | null>(null);
 
   useEffect(() => {
-    if (backend === null) {
-      return;
-    }
+    let active = true;
+    void openSessionRepository()
+      .then(async (opened) => {
+        repository.current = opened;
+        const remembered = await opened.loadMostRecentDevice();
+        if (!active) return;
+        const lastDevice = readyDevice(remembered);
+        currentDevice.current = lastDevice;
+        if (lastDevice !== null) {
+          setHistory(await loadHistory(opened, lastDevice.deviceId));
+          setConnection({ phase: 'disconnected', reason: 'initial', lastDevice });
+        }
+        setHistorySync({ phase: 'ready' });
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
+        setHistorySync({
+          phase: 'failed',
+          message: error instanceof Error ? error.message : 'Unable to open local history',
+        });
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
+  useEffect(() => {
+    if (backend === null) return;
     return backend.transport.subscribeToDisconnect(() => {
       setConnection({
         phase: 'disconnected',
         reason: 'link-loss',
-        lastDevice: readyDevice.current,
+        lastDevice: currentDevice.current,
       });
       setStatus(null);
     });
@@ -139,7 +211,6 @@ export function RuntimeProvider({ children }: PropsWithChildren) {
       setConnection({ phase: 'unavailable', reason: 'unsupported' });
       return;
     }
-
     const availability = await backend.transport.readAvailability();
     if (availability.status === 'unavailable') {
       setConnection({ phase: 'unavailable', reason: availability.reason });
@@ -152,11 +223,9 @@ export function RuntimeProvider({ children }: PropsWithChildren) {
       });
       return;
     }
-
     setConnection({ phase: 'scanning', candidates: [] });
     try {
-      const candidates = await backend.transport.scan(operation);
-      setConnection({ phase: 'scanning', candidates });
+      setConnection({ phase: 'scanning', candidates: await backend.transport.scan(operation) });
     } catch (error) {
       setConnection(retryableState(error, 'scan', null));
     }
@@ -168,7 +237,6 @@ export function RuntimeProvider({ children }: PropsWithChildren) {
         setConnection({ phase: 'unavailable', reason: 'unsupported' });
         return;
       }
-
       const candidate = backend.scenario.candidate;
       if (candidate.transportId !== transportId) {
         setConnection(
@@ -176,54 +244,58 @@ export function RuntimeProvider({ children }: PropsWithChildren) {
         );
         return;
       }
+      if (repository.current === null) {
+        setHistorySync({ phase: 'failed', message: 'Local history is still unavailable' });
+        return;
+      }
 
       setConnection({ phase: 'connecting', candidate });
+      setHistorySync({ phase: 'syncing' });
       try {
-        await backend.transport.connect(candidate, operation);
         setConnection({ phase: 'handshaking', candidate });
-
-        // Exercises transport failures without defining a temporary wire protocol.
-        await backend.transport.request(Uint8Array.of(0), operation);
-        const handshake = backend.device.handshake();
-        if (handshake.kind === 'incompatible') {
+        const result = await synchronizeForeground(
+          backend.transport,
+          candidate,
+          repository.current,
+          Date.now(),
+          operation,
+        );
+        const device = readyDevice(result.device)!;
+        currentDevice.current = device;
+        setConnection({ phase: 'ready', device });
+        setStatus(statusModel(result.status));
+        setHistory(await loadHistory(repository.current, result.deviceId));
+        setHistorySync({ phase: 'ready' });
+      } catch (error) {
+        if (error instanceof DeviceClientError && error.code === 'incompatible') {
           await backend.transport.disconnect();
           setConnection({
             phase: 'incompatible',
             candidate,
-            supportedMajor: handshake.supportedMajor,
-            receivedMajor: handshake.receivedMajor,
+            supportedMajor: error.details.supportedMajor ?? 1,
+            receivedMajor: error.details.receivedMajor ?? 1,
           });
-          return;
+        } else {
+          setConnection(retryableState(error, 'handshake', candidate));
         }
-
-        readyDevice.current = handshake.device;
-        setConnection({ phase: 'ready', device: handshake.device });
-        const deviceStatus = backend.device.readStatus();
-        setStatus({
-          presetName: deviceStatus.selectedPreset.name,
-          plannedDurationMs: deviceStatus.selectedPreset.durationMs,
-          remainingDurationMs: deviceStatus.remainingDurationMs,
-          viewState: deviceStatus.viewState,
-          clockKnown: deviceStatus.clockKnown,
+        setHistorySync({
+          phase: 'failed',
+          message: error instanceof Error ? error.message : 'Synchronization failed',
         });
-        setHistory(synchronizeMockHistory(backend.device, backend.scenario));
-      } catch (error) {
-        setConnection(retryableState(error, 'handshake', candidate));
       }
     },
     [backend],
   );
 
   const disconnect = useCallback(async () => {
-    if (backend === null) {
-      return;
-    }
-
-    const lastDevice = readyDevice.current;
+    if (backend === null) return;
     try {
       await backend.transport.disconnect();
-      readyDevice.current = null;
-      setConnection({ phase: 'disconnected', reason: 'user', lastDevice });
+      setConnection({
+        phase: 'disconnected',
+        reason: 'user',
+        lastDevice: currentDevice.current,
+      });
       setStatus(null);
     } catch (error) {
       setConnection(retryableState(error, 'disconnect', null));
@@ -232,12 +304,10 @@ export function RuntimeProvider({ children }: PropsWithChildren) {
 
   const selectScenario = useCallback((scenarioId: MockScenarioId) => {
     const nextBackend = createBackend(scenarioId);
-    readyDevice.current = null;
     setSelectedScenario(scenarioId);
     setBackend(nextBackend);
     setConnection(initialConnection(nextBackend));
     setStatus(null);
-    setHistory(emptyHistory);
   }, []);
 
   const value = useMemo<CompanionRuntime>(
@@ -245,6 +315,7 @@ export function RuntimeProvider({ children }: PropsWithChildren) {
       connection,
       status,
       history,
+      historySync,
       selectedScenario,
       developmentScenarios: runtimeConfig.deviceBackend === 'mock' ? developmentScenarios : [],
       startScan,
@@ -252,7 +323,17 @@ export function RuntimeProvider({ children }: PropsWithChildren) {
       disconnect,
       selectScenario,
     }),
-    [connection, connect, disconnect, history, selectScenario, selectedScenario, startScan, status],
+    [
+      connection,
+      connect,
+      disconnect,
+      history,
+      historySync,
+      selectScenario,
+      selectedScenario,
+      startScan,
+      status,
+    ],
   );
 
   return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;
@@ -260,10 +341,6 @@ export function RuntimeProvider({ children }: PropsWithChildren) {
 
 export function useCompanionRuntime(): CompanionRuntime {
   const value = useContext(RuntimeContext);
-
-  if (value === null) {
-    throw new Error('useCompanionRuntime must be used inside RuntimeProvider');
-  }
-
+  if (value === null) throw new Error('useCompanionRuntime must be used inside RuntimeProvider');
   return value;
 }

@@ -78,6 +78,24 @@ The same choice can be made explicitly with
 boundary. Screens never read the environment variable or import a native BLE
 object.
 
+## Durable local history
+
+The app stores known device metadata, journal epochs/cursors, retention-gap
+state, and session records in `muninn.sqlite` through `expo-sqlite` 57.0.1.
+Session identity is `(device_id, journal_epoch, sequence)`. Each received page
+is upserted with its cursor inside one exclusive transaction, so a killed app,
+link loss, or local write failure retries from the last committed page without
+inventing records or timestamps. History remains readable without Bluetooth,
+an account, or a cloud service.
+
+After changing native dependencies, regenerate the native dependency graph
+before the next development build:
+
+```sh
+env DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
+  pod install --project-directory=apps/mobile/ios
+```
+
 ## Physical iPhone Development Build
 
 The machine's global `xcode-select` may still point at Apple Command Line Tools,
