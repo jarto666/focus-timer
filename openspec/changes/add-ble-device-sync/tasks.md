@@ -66,19 +66,19 @@
 
 ## 8. Connect the Physical iPhone over BLE
 
-- [ ] 8.1 Add and configure the pinned BLE native dependency in the Expo Development Build, including iOS Bluetooth usage text, required capabilities for the chosen foreground MVP, and documented rebuild commands; do not depend on Expo Go.
-- [ ] 8.2 Implement foreground service-filtered scanning, candidate selection, connect/disconnect, characteristic discovery, handshake, stable-device association, and remembered-device reconnection without treating the iOS peripheral identifier as product identity.
-- [ ] 8.3 Implement the mobile BLE request path with pre-subscribed notifications, bounded fragmentation/reassembly, one in-flight request, explicit timeouts, cancellation, and recovery after malformed or partial responses.
-- [ ] 8.4 Integrate foreground/resume orchestration: reconnect or offer retry, handshake, send the volatile clock anchor, read status, synchronize to current, and preserve local history when the device is unavailable.
-- [ ] 8.5 Prove the same application build can switch between mock and BLE transports without screen branches or divergent logical models.
+- [x] 8.1 Add and configure the pinned BLE native dependency in the Expo Development Build, including iOS Bluetooth usage text, required capabilities for the chosen foreground MVP, and documented rebuild commands; do not depend on Expo Go.
+- [x] 8.2 Implement foreground service-filtered scanning, candidate selection, connect/disconnect, characteristic discovery, handshake, stable-device association, and remembered-device reconnection without treating the iOS peripheral identifier as product identity.
+- [x] 8.3 Implement the mobile BLE request path with pre-subscribed notifications, bounded fragmentation/reassembly, one in-flight request, explicit timeouts, cancellation, and recovery after malformed or partial responses.
+- [x] 8.4 Integrate foreground/resume orchestration: reconnect or offer retry, handshake, send the volatile clock anchor, read status, synchronize to current, and preserve local history when the device is unavailable.
+- [x] 8.5 Prove the same application build can switch between mock and BLE transports without screen branches or divergent logical models.
 - [ ] 8.6 Run a physical end-to-end session: operate the timer without the app, reconnect the iPhone, synchronize the new outcome into SQLite, disconnect, and verify the history remains available offline.
 
 ## 9. Reliability, Resource, and Handoff Acceptance
 
-- [ ] 9.1 Run and record all root device, mobile, protocol, and combined non-hardware checks from a fresh dependency install with formatting and lint warnings treated as failures.
+- [x] 9.1 Run and record all root device, mobile, protocol, and combined non-hardware checks from a fresh dependency install with formatting and lint warnings treated as failures.
 - [ ] 9.2 Exercise physical duplicate request, multi-page catch-up, disconnect mid-page, reconnect, stale cursor/gap, changed epoch, unknown time, corrupt frame, incompatible version, Bluetooth disabled, and permission-denied scenarios against their capability requirements.
 - [ ] 9.3 Run simultaneous large synchronization, fast/slow encoder rotation, OLED refresh, start/pause/resume/cancel/completion, buzzer feedback, reboot, and radio-failure tests and confirm the standalone timer remains authoritative.
 - [ ] 9.4 Record pre/post-BLE firmware size, free heap at idle/connected/transferring, watchdog/reset behavior, negotiated BLE payload/throughput, evidence-backed journal capacity, and whole-device USB current when the ordered meter is available.
-- [ ] 9.5 Audit the shipped command surface and logs to confirm there is no remote timer control, preset mutation, Wi-Fi credential path, OTA path, cloud/account identifier, advertised stable device identity, or default journal-payload logging.
-- [ ] 9.6 Finalize monorepo, protocol, NVS recovery, BLE development-build, mock mode, iPhone setup, test, build, flash, monitor, troubleshooting, security-boundary, and foreground-sync documentation.
-- [ ] 9.7 Audit every scenario in `product-workspace`, `device-sync-protocol`, `ble-device-connection`, `session-journal-sync`, and `mobile-companion`, recording evidence or an explicit follow-up before this change is archived.
+- [x] 9.5 Audit the shipped command surface and logs to confirm there is no remote timer control, preset mutation, Wi-Fi credential path, OTA path, cloud/account identifier, advertised stable device identity, or default journal-payload logging.
+- [x] 9.6 Finalize monorepo, protocol, NVS recovery, BLE development-build, mock mode, iPhone setup, test, build, flash, monitor, troubleshooting, security-boundary, and foreground-sync documentation.
+- [x] 9.7 Audit every scenario in `product-workspace`, `device-sync-protocol`, `ble-device-connection`, `session-journal-sync`, and `mobile-companion`, recording evidence or an explicit follow-up before this change is archived.

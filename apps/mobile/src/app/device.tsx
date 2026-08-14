@@ -1,5 +1,5 @@
 import type { ConnectionPhase, DeviceCandidate } from '@focus-timer/device-client';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { useCompanionRuntime } from '@/application/runtime-provider';
 import { Page } from '@/ui/page';
@@ -109,11 +109,11 @@ export default function DeviceScreen() {
   const presentation = presentationFor(connection.phase);
   const busy = connection.phase === 'connecting' || connection.phase === 'handshaking';
   const candidates = connection.phase === 'scanning' ? connection.candidates : [];
+  const rememberedDevice = connection.phase === 'disconnected' ? connection.lastDevice : null;
   const canSearch =
     connection.phase === 'disconnected' ||
     connection.phase === 'retryable-error' ||
     connection.phase === 'incompatible' ||
-    connection.phase === 'permission-denied' ||
     (connection.phase === 'unavailable' && connection.reason === 'powered-off');
 
   return (
@@ -155,15 +155,39 @@ export default function DeviceScreen() {
           <Text style={styles.waitingText}>Listening for nearby hardware…</Text>
         ) : null}
 
+        {rememberedDevice !== null ? (
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => void connect(rememberedDevice.transportId)}
+            style={styles.primaryButton}
+          >
+            <Text style={styles.primaryButtonText}>Reconnect remembered timer</Text>
+          </Pressable>
+        ) : null}
+
         {canSearch ? (
           <Pressable
             accessibilityRole="button"
             onPress={() => void startScan()}
-            style={styles.primaryButton}
+            style={rememberedDevice === null ? styles.primaryButton : styles.secondaryAction}
           >
-            <Text style={styles.primaryButtonText}>
+            <Text
+              style={
+                rememberedDevice === null ? styles.primaryButtonText : styles.secondaryActionText
+              }
+            >
               {connection.phase === 'disconnected' ? 'Search nearby' : 'Search again'}
             </Text>
+          </Pressable>
+        ) : null}
+
+        {connection.phase === 'permission-denied' && connection.canOpenSettings ? (
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => void Linking.openSettings()}
+            style={styles.primaryButton}
+          >
+            <Text style={styles.primaryButtonText}>Open Bluetooth settings</Text>
           </Pressable>
         ) : null}
 
@@ -369,6 +393,16 @@ const styles = StyleSheet.create({
     minHeight: 52,
   },
   primaryButtonText: { color: color.background, fontSize: 14, fontWeight: '800' },
+  secondaryAction: {
+    alignItems: 'center',
+    alignSelf: 'stretch',
+    borderColor: color.lineBright,
+    borderRadius: radius.control,
+    borderWidth: 1,
+    justifyContent: 'center',
+    minHeight: 48,
+  },
+  secondaryActionText: { color: color.mutedText, fontSize: 13, fontWeight: '700' },
   waitingText: { color: color.mutedText, fontSize: 13, paddingBottom: space.sm },
   sectionLabel: {
     color: color.faintText,

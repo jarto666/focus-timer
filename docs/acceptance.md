@@ -102,6 +102,11 @@ Capability coverage is split as follows:
 All capability scenarios have passing evidence. There are no unmet OpenSpec
 capability scenarios at this checkpoint.
 
+This document freezes the pre-BLE offline MVP checkpoint. The later mobile and
+BLE change has its own evidence and open physical follow-ups in
+[`docs/ble-sync-acceptance.md`](ble-sync-acceptance.md); those follow-ups do not
+retroactively change the offline result above.
+
 ## Explicit transfer follow-ups
 
 These are mechanical or evidence-quality follow-ups, not failed capability

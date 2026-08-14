@@ -350,6 +350,7 @@ pub fn run() -> ! {
                 if message.connection_generation == observed_ble_generation {
                     process_protocol_message(
                         message.as_slice(),
+                        message.transfer_id,
                         now_ms,
                         session,
                         radio,
@@ -444,6 +445,7 @@ fn protocol_hello(device_id: [u8; 16]) -> HelloResponse {
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 fn process_protocol_message(
     bytes: &[u8],
+    request_transfer_id: u16,
     now_ms: u64,
     session: &mut ProtocolSession,
     radio: &mut BleRadio,
@@ -578,7 +580,7 @@ fn process_protocol_message(
             return;
         }
     };
-    if let Err(error) = radio.queue_response(&encoded[..length]) {
+    if let Err(error) = radio.queue_response(&encoded[..length], request_transfer_id) {
         log::warn!(
             "BLE logical response could not enter bounded outbox: request_id={} error={error:?}",
             response.request_id

@@ -15,18 +15,19 @@ import {
   synchronizeForeground,
   type DeviceCandidate,
   type DeviceConnectionState,
+  type DeviceTransport,
   type ReadyDevice,
 } from '@focus-timer/device-client';
 import { SessionOutcome, ViewState } from '@focus-timer/device-protocol';
 import {
   createProtocolMockTransport,
   getMockScenario,
-  type MockDeviceTransport,
   type MockScenario,
   type MockScenarioId,
 } from '@focus-timer/mock-device';
 
 import { runtimeConfig } from '@/config/runtime';
+import { createBleDeviceTransport } from '@/ble/ble-device-transport';
 import {
   openSessionRepository,
   type SqliteSessionRepository,
@@ -40,9 +41,9 @@ import {
   emptyHistory,
 } from './companion-model';
 
-type MockBackend = Readonly<{
-  scenario: MockScenario;
-  transport: MockDeviceTransport;
+type AppBackend = Readonly<{
+  scenario: MockScenario | null;
+  transport: DeviceTransport;
 }>;
 
 const operation = { timeoutMs: 5_000 } as const;
@@ -65,16 +66,16 @@ const developmentScenarios: readonly DevelopmentScenarioOption[] = Object.entrie
 
 const RuntimeContext = createContext<CompanionRuntime | null>(null);
 
-function createBackend(scenarioId: MockScenarioId): MockBackend | null {
-  if (runtimeConfig.deviceBackend !== 'mock') return null;
+function createBackend(scenarioId: MockScenarioId): AppBackend {
+  if (runtimeConfig.deviceBackend === 'ble') {
+    return { scenario: null, transport: createBleDeviceTransport() };
+  }
   const scenario = getMockScenario(scenarioId);
   return { scenario, transport: createProtocolMockTransport(scenario) };
 }
 
-function initialConnection(backend: MockBackend | null): DeviceConnectionState {
-  return backend === null
-    ? { phase: 'unavailable', reason: 'unsupported' }
-    : { phase: 'disconnected', reason: 'initial', lastDevice: null };
+function initialConnection(): DeviceConnectionState {
+  return { phase: 'disconnected', reason: 'initial', lastDevice: null };
 }
 
 function retryableState(
@@ -153,12 +154,10 @@ async function loadHistory(
 
 export function RuntimeProvider({ children }: PropsWithChildren) {
   const [selectedScenario, setSelectedScenario] = useState(runtimeConfig.mockScenario);
-  const [backend, setBackend] = useState<MockBackend | null>(() =>
+  const [backend, setBackend] = useState<AppBackend>(() =>
     createBackend(runtimeConfig.mockScenario),
   );
-  const [connection, setConnection] = useState<DeviceConnectionState>(() =>
-    initialConnection(backend),
-  );
+  const [connection, setConnection] = useState<DeviceConnectionState>(() => initialConnection());
   const [status, setStatus] = useState<CompanionRuntime['status']>(null);
   const [history, setHistory] = useState(emptyHistory);
   const [historySync, setHistorySync] = useState<CompanionRuntime['historySync']>({
@@ -166,6 +165,7 @@ export function RuntimeProvider({ children }: PropsWithChildren) {
   });
   const repository = useRef<SqliteSessionRepository | null>(null);
   const currentDevice = useRef<ReadyDevice | null>(null);
+  const candidates = useRef(new Map<string, DeviceCandidate>());
 
   useEffect(() => {
     let active = true;
@@ -195,7 +195,6 @@ export function RuntimeProvider({ children }: PropsWithChildren) {
   }, []);
 
   useEffect(() => {
-    if (backend === null) return;
     return backend.transport.subscribeToDisconnect(() => {
       setConnection({
         phase: 'disconnected',
@@ -207,25 +206,30 @@ export function RuntimeProvider({ children }: PropsWithChildren) {
   }, [backend]);
 
   const startScan = useCallback(async () => {
-    if (backend === null) {
-      setConnection({ phase: 'unavailable', reason: 'unsupported' });
-      return;
-    }
-    const availability = await backend.transport.readAvailability();
-    if (availability.status === 'unavailable') {
-      setConnection({ phase: 'unavailable', reason: availability.reason });
-      return;
-    }
-    if (availability.status === 'permission-denied') {
-      setConnection({
-        phase: 'permission-denied',
-        canOpenSettings: availability.canOpenSettings,
-      });
-      return;
-    }
-    setConnection({ phase: 'scanning', candidates: [] });
     try {
-      setConnection({ phase: 'scanning', candidates: await backend.transport.scan(operation) });
+      const availability = await backend.transport.readAvailability();
+      if (availability.status === 'unavailable') {
+        setConnection({ phase: 'unavailable', reason: availability.reason });
+        return;
+      }
+      if (availability.status === 'permission-denied') {
+        setConnection({
+          phase: 'permission-denied',
+          canOpenSettings: availability.canOpenSettings,
+        });
+        return;
+      }
+
+      setConnection({ phase: 'scanning', candidates: [] });
+      const discovered = await backend.transport.scan(operation);
+      candidates.current = new Map(
+        discovered.map((candidate) => [candidate.transportId, candidate]),
+      );
+      if (discovered.length === 0) {
+        setConnection(retryableState(new Error('No nearby Focus Timer was found'), 'scan', null));
+        return;
+      }
+      setConnection({ phase: 'scanning', candidates: discovered });
     } catch (error) {
       setConnection(retryableState(error, 'scan', null));
     }
@@ -233,12 +237,19 @@ export function RuntimeProvider({ children }: PropsWithChildren) {
 
   const connect = useCallback(
     async (transportId: string) => {
-      if (backend === null) {
-        setConnection({ phase: 'unavailable', reason: 'unsupported' });
-        return;
-      }
-      const candidate = backend.scenario.candidate;
-      if (candidate.transportId !== transportId) {
+      const remembered = currentDevice.current;
+      const candidate =
+        backend.scenario?.candidate.transportId === transportId
+          ? backend.scenario.candidate
+          : (candidates.current.get(transportId) ??
+            (remembered?.transportId === transportId
+              ? {
+                  transportId,
+                  productName: remembered.productName,
+                  rssi: null,
+                }
+              : null));
+      if (candidate === null) {
         setConnection(
           retryableState(new Error('Selected timer is no longer available'), 'connect', null),
         );
@@ -276,6 +287,7 @@ export function RuntimeProvider({ children }: PropsWithChildren) {
             receivedMajor: error.details.receivedMajor ?? 1,
           });
         } else {
+          await backend.transport.disconnect().catch(() => undefined);
           setConnection(retryableState(error, 'handshake', candidate));
         }
         setHistorySync({
@@ -288,7 +300,6 @@ export function RuntimeProvider({ children }: PropsWithChildren) {
   );
 
   const disconnect = useCallback(async () => {
-    if (backend === null) return;
     try {
       await backend.transport.disconnect();
       setConnection({
@@ -303,10 +314,12 @@ export function RuntimeProvider({ children }: PropsWithChildren) {
   }, [backend]);
 
   const selectScenario = useCallback((scenarioId: MockScenarioId) => {
+    if (runtimeConfig.deviceBackend !== 'mock') return;
     const nextBackend = createBackend(scenarioId);
     setSelectedScenario(scenarioId);
     setBackend(nextBackend);
-    setConnection(initialConnection(nextBackend));
+    candidates.current.clear();
+    setConnection(initialConnection());
     setStatus(null);
   }, []);
 

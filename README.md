@@ -2,8 +2,9 @@
 
 Focus Timer is an offline-first physical timer and its companion software. The
 validated USB-powered ESP32-C3 MVP uses an EC11 encoder, SSD1306 OLED, and 3 V
-active buzzer. Bluetooth synchronization and the iPhone companion are being
-added without making the phone part of timer correctness.
+active buzzer. A foreground BLE synchronization slice and the Muninn iPhone
+companion are implemented without making the phone part of timer correctness;
+integrated physical acceptance remains a bench step.
 
 ## Product layout
 
@@ -55,6 +56,10 @@ See [docs/development.md](docs/development.md) for development and flash
 commands, [docs/hardware.md](docs/hardware.md) for prototype evidence,
 [docs/wiring.md](docs/wiring.md) to reproduce or transfer the circuit, and
 [docs/ble-development.md](docs/ble-development.md) for the bounded NimBLE
-adapter and diagnostic workflow, and [docs/acceptance.md](docs/acceptance.md)
-for the offline-MVP capability audit.
+adapter and diagnostic workflow, [docs/mobile-development.md](docs/mobile-development.md)
+for mock/BLE iPhone builds and foreground sync, and
+[docs/acceptance.md](docs/acceptance.md) for the offline-MVP capability audit.
+The complete scenario-by-scenario BLE sync ledger, including explicit physical
+follow-ups, lives in
+[docs/ble-sync-acceptance.md](docs/ble-sync-acceptance.md).
 The oversized external WS2812 ring remains disconnected and deferred.

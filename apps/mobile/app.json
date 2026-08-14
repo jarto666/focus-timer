@@ -8,6 +8,7 @@
     "scheme": "focus-timer",
     "userInterfaceStyle": "dark",
     "ios": {
+      "appleTeamId": "ZKH7ZWRS85",
       "bundleIdentifier": "com.jarto666.focustimer",
       "icon": "./assets/expo.icon"
     },
@@ -32,6 +33,13 @@
           "backgroundColor": "#061115",
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 76
+        }
+      ],
+      [
+        "react-native-ble-plx",
+        {
+          "isBackgroundEnabled": false,
+          "bluetoothAlwaysPermission": "Allow Muninn to find and synchronize your nearby Focus Timer."
         }
       ]
     ],

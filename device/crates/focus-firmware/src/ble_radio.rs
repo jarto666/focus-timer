@@ -7,7 +7,7 @@ use esp32_nimble::{
 };
 use focus_protocol::{
     FragmentError, MAX_LOGICAL_MESSAGE_BYTES, OwnedFragmenter, Reassembler, ReassemblyStatus,
-    next_transfer_id,
+    parse_frame,
 };
 
 const SERVICE_UUID: BleUuid = uuid128!("1cf47046-2e37-4642-a30e-df24879f994f");
@@ -52,6 +52,7 @@ pub struct InboundMessage {
     bytes: [u8; MAX_LOGICAL_MESSAGE_BYTES],
     length: usize,
     pub connection_generation: u32,
+    pub transfer_id: u16,
 }
 
 impl InboundMessage {
@@ -141,7 +142,6 @@ struct OutboundTransfer {
 pub struct BleRadio {
     shared: Arc<Mutex<SharedState>>,
     response: Arc<Mutex<BLECharacteristic>>,
-    next_transfer_id: u16,
     outbound: Option<Box<OutboundTransfer>>,
     frame: [u8; MAX_GATT_VALUE_BYTES],
 }
@@ -242,6 +242,17 @@ impl BleRadio {
                 return;
             }
 
+            let frame_header = match parse_frame(request.recv_data()) {
+                Ok((header, _)) => header,
+                Err(error) => {
+                    state.reassembler.reset();
+                    log::warn!(
+                        "BLE frame rejected and transfer reset: handle={connection_handle} error={error:?}"
+                    );
+                    request.reject();
+                    return;
+                }
+            };
             match state.reassembler.accept_frame(request.recv_data(), now_ms) {
                 Ok(ReassemblyStatus::InProgress) => {}
                 Ok(ReassemblyStatus::Complete { message_length }) => {
@@ -255,6 +266,7 @@ impl BleRadio {
                         bytes,
                         length: message_length,
                         connection_generation: state.generation,
+                        transfer_id: frame_header.transfer_id,
                     });
                     state.reassembler.reset();
                     log::debug!(
@@ -291,7 +303,6 @@ impl BleRadio {
         Ok(Self {
             shared,
             response,
-            next_transfer_id: 1,
             outbound: None,
             frame: [0; MAX_GATT_VALUE_BYTES],
         })
@@ -332,7 +343,11 @@ impl BleRadio {
     }
 
     /// Starts one bounded response transfer for the active subscribed link.
-    pub fn queue_response(&mut self, message: &[u8]) -> Result<(), QueueError> {
+    pub fn queue_response(
+        &mut self,
+        message: &[u8],
+        request_transfer_id: u16,
+    ) -> Result<(), QueueError> {
         if self.outbound.is_some() {
             return Err(QueueError::Busy);
         }
@@ -342,10 +357,8 @@ impl BleRadio {
             return Err(QueueError::NotSubscribed);
         }
         let frame_bytes = usize::from(connection.mtu.saturating_sub(3)).min(MAX_GATT_VALUE_BYTES);
-        let transfer_id = self.next_transfer_id;
-        let fragments = OwnedFragmenter::new(message, transfer_id, frame_bytes)
+        let fragments = OwnedFragmenter::new(message, request_transfer_id, frame_bytes)
             .map_err(QueueError::Fragment)?;
-        self.next_transfer_id = next_transfer_id(transfer_id);
         self.outbound = Some(Box::new(OutboundTransfer {
             connection_generation: state.generation,
             connection_handle: connection.handle,
