@@ -101,6 +101,26 @@ not a pass: it names the remaining physical evidence required before archive.
 - A remote launch while the user was away was rejected only because the iPhone
   was locked; installation remained successful.
 
+## Firmware size evidence
+
+Both revisions were built from their own clean source tree with the same pinned
+ESP toolchain, default production features, and debug profile. Commit `ba49b6d`
+is the last journal-integrated checkpoint before the BLE firmware adapter;
+`c39dfc7` is the native-iPhone-BLE checkpoint. GNU `size` reports allocatable
+ELF sections, not the 21 MB debug-symbol file size:
+
+| Revision                 | `text`   | `data`  | `bss`    | Total (`dec`) |
+| ------------------------ | -------- | ------- | -------- | ------------- |
+| pre-BLE `ba49b6d`        | 463,896  | 220,558 | 513,282  | 1,197,736     |
+| BLE checkpoint `c39dfc7` | 793,468  | 290,593 | 803,685  | 1,887,746     |
+| delta                    | +329,572 | +70,035 | +290,403 | +690,010      |
+| relative delta           | +71.0%   | +31.8%  | +56.6%   | +57.6%        |
+
+This closes only the reproducible pre/post size slice of task 9.4. Flash image
+partition fit, live free heap, negotiated throughput, watchdog/reset behavior,
+and current still require the controller and meter; no host ELF number is used
+as a substitute.
+
 ## Open physical checklist
 
 These items intentionally remain unchecked in `tasks.md` until the controller
