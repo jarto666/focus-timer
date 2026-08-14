@@ -718,6 +718,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "focus-protocol"
+version = "0.1.0"
+dependencies = [
+ "heapless 0.8.0",
+]
+
+[[package]]
 name = "fs_at"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
