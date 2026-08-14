@@ -1,6 +1,7 @@
 import { Link } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import type { DeviceConnectionState } from '@focus-timer/device-client';
 
 import { useCompanionRuntime } from '@/application/runtime-provider';
 import { Page } from '@/ui/page';
@@ -14,8 +15,8 @@ function formatTimer(milliseconds: number): string {
   return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 }
 
-function connectionCopy(phase: ReturnType<typeof useCompanionRuntime>['connection']['phase']) {
-  switch (phase) {
+function connectionCopy(connection: DeviceConnectionState) {
+  switch (connection.phase) {
     case 'ready':
       return {
         eyebrow: 'DEVICE // LINKED',
@@ -48,6 +49,17 @@ function connectionCopy(phase: ReturnType<typeof useCompanionRuntime>['connectio
         pairDetail: 'Handshake in progress',
       };
     case 'unavailable':
+      if (connection.reason === 'powered-off') {
+        return {
+          eyebrow: 'DEVICE // RADIO OFF',
+          title: 'Bluetooth is off.',
+          detail: 'Turn on Bluetooth to reconnect. Your local session history stays available.',
+          badge: 'RADIO OFF',
+          dial: 'NO RADIO',
+          pairLabel: 'Review connection',
+          pairDetail: 'Bluetooth is disabled on this iPhone',
+        };
+      }
       return {
         eyebrow: 'DEVICE // UNAVAILABLE',
         title: 'Timer out of reach.',
@@ -88,6 +100,17 @@ function connectionCopy(phase: ReturnType<typeof useCompanionRuntime>['connectio
         pairDetail: 'Resume from saved progress',
       };
     case 'disconnected':
+      if (connection.lastDevice !== null) {
+        return {
+          eyebrow: 'DEVICE // OFFLINE',
+          title: 'Timer offline.',
+          detail: 'Muninn remembers this timer and will resume from the last saved session.',
+          badge: 'OFFLINE',
+          dial: 'LINK CLOSED',
+          pairLabel: 'Reconnect timer',
+          pairDetail: 'Use the remembered device',
+        };
+      }
       return {
         eyebrow: 'DEVICE // UNPAIRED',
         title: 'Unpaired.',
@@ -102,7 +125,7 @@ function connectionCopy(phase: ReturnType<typeof useCompanionRuntime>['connectio
 
 export default function HomeScreen() {
   const { connection, history, status } = useCompanionRuntime();
-  const copy = connectionCopy(connection.phase);
+  const copy = connectionCopy(connection);
   const ready = connection.phase === 'ready';
   const dialLabel = status?.viewState.toUpperCase() ?? copy.dial;
   const entryCount = String(history.entries.length).padStart(2, '0');

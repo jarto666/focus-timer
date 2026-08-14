@@ -127,6 +127,19 @@ impl<const CAPACITY: usize> Journal<CAPACITY> {
         health: JournalHealth,
         retained: impl IntoIterator<Item = JournalRecord>,
     ) -> Result<Self, JournalError> {
+        let mut journal = Self::reconstruct_empty(device_id, epoch, high_water_sequence, health)?;
+        for record in retained {
+            journal.retain_reconstructed(record)?;
+        }
+        Ok(journal)
+    }
+
+    pub(crate) fn reconstruct_empty(
+        device_id: DeviceId,
+        epoch: JournalEpoch,
+        high_water_sequence: u64,
+        health: JournalHealth,
+    ) -> Result<Self, JournalError> {
         if CAPACITY == 0 {
             return Err(JournalError::ZeroCapacity);
         }
@@ -134,28 +147,32 @@ impl<const CAPACITY: usize> Journal<CAPACITY> {
             return Err(JournalError::InvalidHighWater);
         }
 
-        let mut records = Deque::new();
-        let mut previous = None;
-        for record in retained {
-            if record.sequence == 0 || record.sequence > high_water_sequence {
-                return Err(JournalError::InvalidRetainedSequence);
-            }
-            if previous.is_some_and(|sequence| record.sequence <= sequence) {
-                return Err(JournalError::RetainedRecordsOutOfOrder);
-            }
-            records
-                .push_back(record)
-                .map_err(|_| JournalError::TooManyRetainedRecords)?;
-            previous = records.back().map(|record| record.sequence);
-        }
-
         Ok(Self {
             device_id,
             epoch,
             high_water_sequence,
             health,
-            records,
+            records: Deque::new(),
         })
+    }
+
+    pub(crate) fn retain_reconstructed(
+        &mut self,
+        record: JournalRecord,
+    ) -> Result<(), JournalError> {
+        if record.sequence == 0 || record.sequence > self.high_water_sequence {
+            return Err(JournalError::InvalidRetainedSequence);
+        }
+        if self
+            .records
+            .back()
+            .is_some_and(|previous| record.sequence <= previous.sequence)
+        {
+            return Err(JournalError::RetainedRecordsOutOfOrder);
+        }
+        self.records
+            .push_back(record)
+            .map_err(|_| JournalError::TooManyRetainedRecords)
     }
 
     #[must_use]

@@ -1,6 +1,10 @@
-import { JournalHealth, MAX_RECORDS_PER_PAGE } from '@focus-timer/device-protocol';
+import {
+  JournalHealth,
+  MAX_RECORDS_PER_PAGE,
+  ProtocolErrorCode,
+} from '@focus-timer/device-protocol';
 
-import { DeviceClient } from './device-client';
+import { DeviceClient, DeviceClientError } from './device-client';
 import type {
   DeviceCandidate,
   DeviceTransport,
@@ -39,7 +43,7 @@ export async function synchronizeForeground(
   transport: DeviceTransport,
   candidate: DeviceCandidate,
   repository: SessionRepository,
-  utcNowMs: number,
+  utcNowMs: () => number,
   operation: DeviceTransportOperation,
 ): Promise<ForegroundSyncResult> {
   const client = new DeviceClient(transport);
@@ -54,7 +58,25 @@ export async function synchronizeForeground(
     protocolVersion: hello.supportedVersion,
   };
   await repository.rememberDevice(device);
-  await client.setClockAnchor(utcNowMs, operation);
+  // Read wall time only after the link and version handshake are ready. A
+  // timestamp captured before BLE connection setup can already be older than
+  // the device's current anchor by the time this request reaches firmware,
+  // causing a healthy foreground reconnect to be rejected as backwards time.
+  try {
+    await client.setClockAnchor(utcNowMs(), operation);
+  } catch (error) {
+    // A volatile wall-clock refresh is optional metadata, not a prerequisite
+    // for read-only status/history sync. Crystal drift or a legitimate phone
+    // clock correction can put a later anchor fractionally behind the device's
+    // extrapolated UTC. Firmware correctly rejects that backwards update and
+    // preserves its previous anchor; the companion must still catch up the
+    // durable journal instead of turning the whole reconnect into a failure.
+    const rejectedClockUpdate =
+      error instanceof DeviceClientError &&
+      error.code === 'remote-error' &&
+      error.details.protocolErrorCode === ProtocolErrorCode.InvalidField;
+    if (!rejectedClockUpdate) throw error;
+  }
   const status = await client.getStatus(operation);
 
   if (status.journal.health === JournalHealth.Unavailable) {

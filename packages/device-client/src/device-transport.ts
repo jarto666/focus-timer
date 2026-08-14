@@ -71,5 +71,7 @@ export interface DeviceTransport {
 
   request(payload: Uint8Array, operation: DeviceTransportOperation): Promise<Uint8Array>;
 
+  subscribeToAvailability(listener: (state: DeviceTransportAvailability) => void): () => void;
+
   subscribeToDisconnect(listener: (event: DeviceTransportDisconnect) => void): () => void;
 }

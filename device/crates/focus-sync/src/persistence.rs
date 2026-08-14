@@ -1,10 +1,10 @@
 use heapless::{String, Vec};
 
 use crate::{
-    DeviceId, Journal, JournalEpoch, JournalError, JournalHealth, JournalPage,
+    DeviceId, Journal, JournalEpoch, JournalError, JournalHealth, JournalPage, JournalRecord,
     MAX_ENCODED_JOURNAL_RECORD_BYTES, MetadataRecord, PendingRecord, StorageEncodeError,
-    StoredJournalRecord, decode_identity, decode_metadata, decode_record, encode_identity,
-    encode_metadata, encode_record,
+    decode_identity, decode_metadata, decode_record, encode_identity, encode_metadata,
+    encode_record,
 };
 
 pub const SYNC_NAMESPACE: &str = "focus_sync";
@@ -84,6 +84,12 @@ pub struct InitReport {
     pub invalid_slot_count: usize,
 }
 
+#[derive(Clone, Copy)]
+struct StoredPosition {
+    journal_epoch: JournalEpoch,
+    sequence: u64,
+}
+
 #[derive(Debug, Eq, PartialEq)]
 pub enum AppendError<StoreError> {
     Model(JournalError),
@@ -110,6 +116,7 @@ where
     /// Returns storage/entropy failures, unsupported capacity, oversized blobs,
     /// or an impossible reconstructed model. Corrupt individual records are
     /// isolated and reported through [`InitReport`] instead of becoming fatal.
+    #[inline(never)]
     pub fn initialize<Entropy>(
         mut store: Store,
         entropy: &mut Entropy,
@@ -141,8 +148,8 @@ where
         let metadata_a = read_metadata(&mut store, METADATA_A_KEY)?;
         let metadata_b = read_metadata(&mut store, METADATA_B_KEY)?;
         let metadata = select_metadata(metadata_a, metadata_b);
-        let mut stored_records =
-            read_slots::<_, Entropy::Error, CAPACITY>(&mut store, &mut report)?;
+        let mut stored_positions =
+            scan_slots::<_, Entropy::Error, CAPACITY>(&mut store, &mut report)?;
 
         let (epoch, mut generation, mut high_water_sequence, initialize_metadata) =
             if identity_is_new {
@@ -155,12 +162,12 @@ where
                     metadata.high_water_sequence,
                     false,
                 )
-            } else if let Some(epoch) = unique_slot_epoch(stored_records.as_slice()) {
+            } else if let Some(epoch) = unique_slot_epoch(stored_positions.as_slice()) {
                 report.epoch = EpochInit::RecoveredFromSlots;
-                let high_water = highest_sequence(stored_records.as_slice(), epoch);
+                let high_water = highest_sequence(stored_positions.as_slice(), epoch);
                 (epoch, 0, high_water, true)
             } else {
-                report.epoch = if stored_records.is_empty() {
+                report.epoch = if stored_positions.is_empty() {
                     EpochInit::Provisioned
                 } else {
                     EpochInit::RotatedAfterAmbiguity
@@ -168,13 +175,10 @@ where
                 (random_epoch(entropy)?, 0, 0, true)
             };
 
-        stored_records.retain(|stored| stored.journal_epoch == epoch);
-        stored_records.sort_unstable_by_key(|stored| stored.record.sequence);
-        high_water_sequence = high_water_sequence.max(
-            stored_records
-                .last()
-                .map_or(0, |stored| stored.record.sequence),
-        );
+        stored_positions.retain(|stored| stored.journal_epoch == epoch);
+        stored_positions.sort_unstable_by_key(|stored| stored.sequence);
+        high_water_sequence =
+            high_water_sequence.max(stored_positions.last().map_or(0, |stored| stored.sequence));
 
         if initialize_metadata {
             write_metadata_pair(&mut store, epoch, high_water_sequence)
@@ -188,6 +192,25 @@ where
                 .map_err(InitError::Storage)?;
         }
 
+        let mut journal = Journal::reconstruct_empty(
+            device_id,
+            epoch,
+            high_water_sequence,
+            JournalHealth::Healthy,
+        )
+        .map_err(InitError::Model)?;
+        for position in stored_positions {
+            let Some(record) =
+                read_retained_record::<_, Entropy::Error, CAPACITY>(&mut store, position)?
+            else {
+                report.invalid_slot_count += 1;
+                continue;
+            };
+            journal
+                .retain_reconstructed(record)
+                .map_err(InitError::Model)?;
+        }
+
         let health = if report.identity == IdentityInit::Replaced
             || report.epoch == EpochInit::RotatedAfterAmbiguity
             || report.epoch == EpochInit::RecoveredFromSlots
@@ -198,9 +221,7 @@ where
         } else {
             JournalHealth::Healthy
         };
-        let retained = stored_records.into_iter().map(|stored| stored.record);
-        let journal = Journal::reconstruct(device_id, epoch, high_water_sequence, health, retained)
-            .map_err(InitError::Model)?;
+        journal.set_health(health);
 
         Ok((
             Self {
@@ -351,10 +372,10 @@ where
     Ok(bytes.and_then(|bytes| decode_metadata(bytes.as_slice()).ok()))
 }
 
-fn read_slots<Store, EntropyError, const CAPACITY: usize>(
+fn scan_slots<Store, EntropyError, const CAPACITY: usize>(
     store: &mut Store,
     report: &mut InitReport,
-) -> Result<Vec<StoredJournalRecord, CAPACITY>, InitError<Store::Error, EntropyError>>
+) -> Result<Vec<StoredPosition, CAPACITY>, InitError<Store::Error, EntropyError>>
 where
     Store: BlobStore,
 {
@@ -372,9 +393,33 @@ where
             report.invalid_slot_count += 1;
             continue;
         }
-        let _ = records.push(stored);
+        let _ = records.push(StoredPosition {
+            journal_epoch: stored.journal_epoch,
+            sequence: stored.record.sequence,
+        });
     }
     Ok(records)
+}
+
+fn read_retained_record<Store, EntropyError, const CAPACITY: usize>(
+    store: &mut Store,
+    position: StoredPosition,
+) -> Result<Option<JournalRecord>, InitError<Store::Error, EntropyError>>
+where
+    Store: BlobStore,
+{
+    let key = slot_key::<CAPACITY>(position.sequence).map_err(InitError::Model)?;
+    let Some(bytes) = read_blob(store, key.as_str()).map_err(map_read_error)? else {
+        return Ok(None);
+    };
+    let Ok(stored) = decode_record(bytes.as_slice()) else {
+        return Ok(None);
+    };
+    if stored.journal_epoch != position.journal_epoch || stored.record.sequence != position.sequence
+    {
+        return Ok(None);
+    }
+    Ok(Some(stored.record))
 }
 
 fn select_metadata(a: Option<MetadataRecord>, b: Option<MetadataRecord>) -> Option<MetadataRecord> {
@@ -389,7 +434,7 @@ fn select_metadata(a: Option<MetadataRecord>, b: Option<MetadataRecord>) -> Opti
     }
 }
 
-fn unique_slot_epoch(records: &[StoredJournalRecord]) -> Option<JournalEpoch> {
+fn unique_slot_epoch(records: &[StoredPosition]) -> Option<JournalEpoch> {
     let first = records.first()?.journal_epoch;
     records
         .iter()
@@ -397,11 +442,11 @@ fn unique_slot_epoch(records: &[StoredJournalRecord]) -> Option<JournalEpoch> {
         .then_some(first)
 }
 
-fn highest_sequence(records: &[StoredJournalRecord], epoch: JournalEpoch) -> u64 {
+fn highest_sequence(records: &[StoredPosition], epoch: JournalEpoch) -> u64 {
     records
         .iter()
         .filter(|record| record.journal_epoch == epoch)
-        .map(|record| record.record.sequence)
+        .map(|record| record.sequence)
         .max()
         .unwrap_or_default()
 }

@@ -1,0 +1,7 @@
+ M .gitignore
+ M docs/ble-development.md
+ M docs/ble-sync-acceptance.md
+ M openspec/changes/add-ble-device-sync/tasks.md
+ M scripts/README.md
+?? docs/hardware-evidence/ble-sync/
+?? scripts/ble-acceptance.sh

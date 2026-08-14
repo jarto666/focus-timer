@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { resolveDeviceBackend, resolveMockScenario } from './runtime';
+import {
+  resolveBleAcceptanceDiagnostic,
+  resolveDeviceBackend,
+  resolveMockScenario,
+} from './runtime';
 
 describe('resolveDeviceBackend', () => {
   it.each([undefined, '', 'mock'])('defaults %s to the deterministic mock', (value) => {
@@ -27,5 +31,19 @@ describe('resolveMockScenario', () => {
 
   it('rejects silent fallback for an unknown scenario', () => {
     expect(() => resolveMockScenario('random-demo')).toThrow(/expected one of/);
+  });
+});
+
+describe('resolveBleAcceptanceDiagnostic', () => {
+  it.each([undefined, '', 'off'])('defaults %s to disabled', (value) => {
+    expect(resolveBleAcceptanceDiagnostic(value)).toBe('off');
+  });
+
+  it('accepts the explicit physical fault matrix', () => {
+    expect(resolveBleAcceptanceDiagnostic('fault-matrix')).toBe('fault-matrix');
+  });
+
+  it('rejects an unknown physical diagnostic', () => {
+    expect(() => resolveBleAcceptanceDiagnostic('danger')).toThrow(/fault-matrix/);
   });
 });

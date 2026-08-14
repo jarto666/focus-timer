@@ -1,4 +1,4 @@
-use std::{thread, time::Duration};
+use std::{boxed::Box, thread, time::Duration};
 
 use embedded_graphics::{
     Drawable,
@@ -10,15 +10,19 @@ use embedded_graphics::{
     prelude::{DrawTarget, Point},
     text::{Baseline, Text},
 };
+use embedded_hal::i2c::{ErrorType, I2c, Operation};
 use esp_idf_svc::hal::{
-    delay::BLOCK,
+    delay::TickType,
     gpio::{Output, PinDriver, Pull},
-    i2c::{I2cConfig, I2cDriver},
+    i2c::{I2cConfig, I2cDriver, I2cError},
     peripherals::Peripherals,
     units::KiloHertz,
 };
 use esp_idf_svc::nvs::EspDefaultNvsPartition;
-#[cfg(not(feature = "acceptance-diagnostic"))]
+#[cfg(not(any(
+    feature = "acceptance-diagnostic",
+    feature = "radio-failure-diagnostic"
+)))]
 use focus_core::DEFAULT_PRESETS;
 use focus_core::{App, Catalog, Effects, InputEvent, Preset, SettingsLoad};
 use focus_firmware::{
@@ -55,8 +59,98 @@ const INPUT_POLL_INTERVAL: Duration = Duration::from_millis(1);
 const TIME_ADVANCE_INTERVAL_MS: u64 = 10;
 const RENDER_RETRY_MS: u64 = 250;
 const OLED_ADDRESS: u8 = 0x3c;
+const I2C_TRANSACTION_TIMEOUT: u32 = TickType::new_millis(100).ticks();
+#[cfg(feature = "ble-fault-diagnostic")]
+const FAULT_DIAGNOSTIC_NOTIFICATION_INTERVAL_MS: u64 = 100;
 
-#[cfg(not(feature = "acceptance-diagnostic"))]
+type DeviceJournal = PersistentJournal<NvsJournalStore, JOURNAL_CAPACITY>;
+
+/// Gives the display driver a finite deadline instead of the HAL's default
+/// `BLOCK` sentinel. A loose OLED wire must not stall the authoritative timer
+/// task until the interrupt watchdog resets the whole device.
+struct BoundedI2c<'d> {
+    driver: I2cDriver<'d>,
+}
+
+impl<'d> BoundedI2c<'d> {
+    fn new(driver: I2cDriver<'d>) -> Self {
+        Self { driver }
+    }
+}
+
+impl ErrorType for BoundedI2c<'_> {
+    type Error = I2cError;
+}
+
+impl I2c for BoundedI2c<'_> {
+    fn read(&mut self, address: u8, buffer: &mut [u8]) -> Result<(), Self::Error> {
+        self.driver
+            .read(address, buffer, I2C_TRANSACTION_TIMEOUT)
+            .map_err(Into::into)
+    }
+
+    fn write(&mut self, address: u8, bytes: &[u8]) -> Result<(), Self::Error> {
+        self.driver
+            .write(address, bytes, I2C_TRANSACTION_TIMEOUT)
+            .map_err(Into::into)
+    }
+
+    fn write_read(
+        &mut self,
+        address: u8,
+        bytes: &[u8],
+        buffer: &mut [u8],
+    ) -> Result<(), Self::Error> {
+        self.driver
+            .write_read(address, bytes, buffer, I2C_TRANSACTION_TIMEOUT)
+            .map_err(Into::into)
+    }
+
+    fn transaction(
+        &mut self,
+        address: u8,
+        operations: &mut [Operation<'_>],
+    ) -> Result<(), Self::Error> {
+        self.driver
+            .transaction(address, operations, I2C_TRANSACTION_TIMEOUT)
+            .map_err(Into::into)
+    }
+}
+
+/// Builds the large fixed-capacity journal away from the already sizeable
+/// authoritative-loop frame, then keeps it on the heap for the device's
+/// lifetime. This avoids stacking the 64-record journal and its 28 KiB NVS
+/// reconstruction workspace on top of each other.
+#[inline(never)]
+fn initialize_session_journal(
+    store: NvsJournalStore,
+    entropy: &mut EspEntropy,
+) -> Option<Box<DeviceJournal>> {
+    match PersistentJournal::<_, JOURNAL_CAPACITY>::initialize(store, entropy) {
+        Ok((journal, report)) => {
+            let journal = Box::new(journal);
+            log::info!(
+                "session journal ready: device={:02x?} epoch={:02x?} bounds={:?} health={:?} init={report:?}",
+                journal.journal().device_id(),
+                journal.journal().epoch(),
+                journal.journal().bounds(),
+                journal.journal().health(),
+            );
+            Some(journal)
+        }
+        Err(error) => {
+            log::error!(
+                "session journal initialization failed: {error:?}; timer remains usable without synchronization durability"
+            );
+            None
+        }
+    }
+}
+
+#[cfg(not(any(
+    feature = "acceptance-diagnostic",
+    feature = "radio-failure-diagnostic"
+)))]
 const RUNTIME_PRESETS: [Preset; 5] = DEFAULT_PRESETS;
 
 /// Short copies of the production presets for an on-device lifecycle check.
@@ -64,7 +158,10 @@ const RUNTIME_PRESETS: [Preset; 5] = DEFAULT_PRESETS;
 /// IDs, names, ordering, input handling, rendering, and feedback remain the
 /// same as production. Only durations are shortened so completion can be
 /// observed without waiting fifteen minutes.
-#[cfg(feature = "acceptance-diagnostic")]
+#[cfg(any(
+    feature = "acceptance-diagnostic",
+    feature = "radio-failure-diagnostic"
+))]
 const RUNTIME_PRESETS: [Preset; 5] = [
     Preset::new("deep-work", "Deep Work", 8_000),
     Preset::new("focus", "Focus", 8_000),
@@ -79,6 +176,7 @@ const RUNTIME_PRESETS: [Preset; 5] = [
 #[allow(clippy::too_many_lines)]
 pub fn run() -> ! {
     let peripherals = Peripherals::take().expect("ESP32 peripherals must be available once");
+    log::info!("runtime stage: peripherals acquired");
 
     let s1 = PinDriver::input(peripherals.pins.gpio0, Pull::Up)
         .expect("failed to configure EC11 S1 on GPIO0");
@@ -104,6 +202,7 @@ pub fn run() -> ! {
         }
     };
     let mut buzzer_cadence = BuzzerCadence::new();
+    log::info!("runtime stage: encoder and buzzer GPIO configured");
 
     let boot_s1 = s1.is_high();
     let boot_s2 = s2.is_high();
@@ -116,22 +215,53 @@ pub fn run() -> ! {
         .baudrate(KiloHertz(100).into())
         .sda_enable_pullup(true)
         .scl_enable_pullup(true);
-    let mut i2c = I2cDriver::new(
+    let i2c = I2cDriver::new(
         peripherals.i2c0,
         peripherals.pins.gpio7,
         peripherals.pins.gpio6,
         &i2c_config,
-    )
-    .expect("failed to configure OLED I2C on GPIO6/GPIO7");
-    i2c.write(OLED_ADDRESS, &[0x00, 0xae], BLOCK)
-        .expect("OLED must ACK at the bench-verified address 0x3C");
-
-    let interface = I2CDisplayInterface::new_custom_address(i2c, OLED_ADDRESS);
-    let mut display = Ssd1306::new(interface, DisplaySize128x64, DisplayRotation::Rotate0)
-        .into_buffered_graphics_mode();
-    display.init().expect("SSD1306 initialization must succeed");
+    );
+    let mut display = match i2c {
+        Ok(mut i2c) => {
+            log::info!("runtime stage: probing OLED at 0x{OLED_ADDRESS:02X}");
+            match i2c.write(OLED_ADDRESS, &[0x00, 0xae], I2C_TRANSACTION_TIMEOUT) {
+                Ok(()) => {
+                    let interface =
+                        I2CDisplayInterface::new_custom_address(BoundedI2c::new(i2c), OLED_ADDRESS);
+                    let mut candidate =
+                        Ssd1306::new(interface, DisplaySize128x64, DisplayRotation::Rotate0)
+                            .into_buffered_graphics_mode();
+                    match candidate.init() {
+                        Ok(()) => {
+                            log::info!("runtime stage: OLED initialized");
+                            Some(candidate)
+                        }
+                        Err(error) => {
+                            log::error!(
+                                "SSD1306 initialization failed: {error:?}; continuing without a display"
+                            );
+                            None
+                        }
+                    }
+                }
+                Err(error) => {
+                    log::error!(
+                        "OLED did not ACK within 100 ms: {error:?}; continuing without a display"
+                    );
+                    None
+                }
+            }
+        }
+        Err(error) => {
+            log::error!(
+                "failed to configure OLED I2C on GPIO6/GPIO7: {error:?}; continuing without a display"
+            );
+            None
+        }
+    };
 
     let catalog = Catalog::new(&RUNTIME_PRESETS, 2).expect("firmware catalog must be valid");
+    log::info!("runtime stage: opening persistent stores");
     let nvs_partition = match EspDefaultNvsPartition::take() {
         Ok(partition) => Some(partition),
         Err(error) => {
@@ -156,26 +286,7 @@ pub fn run() -> ! {
     let mut entropy = EspEntropy;
     let mut session_journal = match nvs_partition.as_ref() {
         Some(partition) => match NvsJournalStore::open(partition.clone()) {
-            Ok(store) => {
-                match PersistentJournal::<_, JOURNAL_CAPACITY>::initialize(store, &mut entropy) {
-                    Ok((journal, report)) => {
-                        log::info!(
-                            "session journal ready: device={:02x?} epoch={:02x?} bounds={:?} health={:?} init={report:?}",
-                            journal.journal().device_id(),
-                            journal.journal().epoch(),
-                            journal.journal().bounds(),
-                            journal.journal().health(),
-                        );
-                        Some(journal)
-                    }
-                    Err(error) => {
-                        log::error!(
-                            "session journal initialization failed: {error:?}; timer remains usable without synchronization durability"
-                        );
-                        None
-                    }
-                }
-            }
+            Ok(store) => initialize_session_journal(store, &mut entropy),
             Err(error) => {
                 log::error!(
                     "focus_sync NVS namespace unavailable: {error:?}; timer remains usable without synchronization durability"
@@ -221,14 +332,24 @@ pub fn run() -> ! {
     let mut protocol_session = session_journal
         .as_ref()
         .map(|journal| ProtocolSession::new(protocol_hello(journal.journal().device_id())));
-    let mut ble_radio = if protocol_session.is_some() {
-        match BleRadio::start() {
-            Ok(radio) => Some(radio),
-            Err(error) => {
-                log::error!(
-                    "BLE service initialization failed: {error:?}; continuing as a complete offline timer"
-                );
-                None
+    let mut ble_radio: Option<BleRadio> = if protocol_session.is_some() {
+        #[cfg(feature = "radio-failure-diagnostic")]
+        {
+            log::error!(
+                "RADIO FAILURE DIAGNOSTIC: injected BLE initialization failure; continuing as a complete offline timer"
+            );
+            None
+        }
+        #[cfg(not(feature = "radio-failure-diagnostic"))]
+        {
+            match BleRadio::start() {
+                Ok(radio) => Some(radio),
+                Err(error) => {
+                    log::error!(
+                        "BLE service initialization failed: {error:?}; continuing as a complete offline timer"
+                    );
+                    None
+                }
             }
         }
     } else {
@@ -245,6 +366,8 @@ pub fn run() -> ! {
     let mut next_render_attempt_ms = 0;
     let mut render_pending = boot_effects.render;
     let mut rendered_second = None;
+    #[cfg(feature = "ble-fault-diagnostic")]
+    let mut next_notification_poll_ms = 0;
 
     if let Some(diagnostic) = boot_effects.diagnostic {
         log::warn!("core boot diagnostic: {diagnostic:?}");
@@ -253,8 +376,17 @@ pub fn run() -> ! {
     log::info!(
         "integrated runtime ready: OLED=0x{OLED_ADDRESS:02X} GPIO6/GPIO7; EC11 S1=GPIO0 S2=GPIO4 KEY=GPIO5; active buzzer=GPIO1 through 330 ohm; boot levels S1={boot_s1} S2={boot_s2} KEY={boot_key}"
     );
+    log_resource_snapshot("idle-ready");
     #[cfg(feature = "acceptance-diagnostic")]
     log::warn!("ACCEPTANCE DIAGNOSTIC: all five presets are temporarily shortened to 8 seconds");
+    #[cfg(feature = "ble-fault-diagnostic")]
+    log::warn!(
+        "BLE FAULT DIAGNOSTIC: response fragments are intentionally spaced by {FAULT_DIAGNOSTIC_NOTIFICATION_INTERVAL_MS} ms"
+    );
+    #[cfg(feature = "radio-failure-diagnostic")]
+    log::warn!(
+        "RADIO FAILURE DIAGNOSTIC: BLE is intentionally absent and all five presets are temporarily shortened to 8 seconds"
+    );
 
     loop {
         let now_ms = clock.now_ms();
@@ -319,7 +451,7 @@ pub fn run() -> ! {
             }
         }
 
-        if let Some(journal) = session_journal.as_mut() {
+        if let Some(journal) = session_journal.as_deref_mut() {
             match outcome_queue.flush_due(now_ms, journal) {
                 JournalFlushOutcome::Idle | JournalFlushOutcome::Waiting => {}
                 JournalFlushOutcome::Saved { sequence } => {
@@ -344,6 +476,11 @@ pub fn run() -> ! {
                     connection.subscribed,
                     connection.mtu
                 );
+                log_resource_snapshot(if connection.connected {
+                    "connected"
+                } else {
+                    "disconnected"
+                });
             }
 
             if let Some(message) = radio.take_request(now_ms) {
@@ -355,7 +492,7 @@ pub fn run() -> ! {
                         session,
                         radio,
                         &app,
-                        session_journal.as_ref(),
+                        session_journal.as_deref(),
                         &mut wall_clock,
                     );
                 } else {
@@ -366,18 +503,40 @@ pub fn run() -> ! {
                 }
             }
 
-            match radio.poll_notification() {
-                Ok(NotificationProgress::Idle | NotificationProgress::Sent) => {}
-                Ok(NotificationProgress::Complete) => {
-                    log::debug!("BLE logical response notification transfer complete");
+            let notification_poll_due = {
+                #[cfg(feature = "ble-fault-diagnostic")]
+                {
+                    now_ms >= next_notification_poll_ms
                 }
-                Ok(NotificationProgress::DroppedConnection) => {
-                    log::warn!("BLE logical response dropped after connection lifecycle changed");
+                #[cfg(not(feature = "ble-fault-diagnostic"))]
+                {
+                    true
                 }
-                Err(error) => {
-                    log::warn!(
-                        "BLE notification failed; client may retry the read-only request: {error:?}"
-                    );
+            };
+            if notification_poll_due {
+                match radio.poll_notification() {
+                    Ok(NotificationProgress::Idle) => {}
+                    Ok(NotificationProgress::Sent) => {
+                        #[cfg(feature = "ble-fault-diagnostic")]
+                        {
+                            next_notification_poll_ms =
+                                now_ms.saturating_add(FAULT_DIAGNOSTIC_NOTIFICATION_INTERVAL_MS);
+                        }
+                    }
+                    Ok(NotificationProgress::Complete) => {
+                        log::debug!("BLE logical response notification transfer complete");
+                        log_resource_snapshot("transfer-complete");
+                    }
+                    Ok(NotificationProgress::DroppedConnection) => {
+                        log::warn!(
+                            "BLE logical response dropped after connection lifecycle changed"
+                        );
+                    }
+                    Err(error) => {
+                        log::warn!(
+                            "BLE notification failed; client may retry the read-only request: {error:?}"
+                        );
+                    }
                 }
             }
         }
@@ -390,25 +549,30 @@ pub fn run() -> ! {
 
         if render_pending && now_ms >= next_render_attempt_ms {
             let view = oled_view(snapshot);
-            display.clear_buffer();
-            draw_view(&mut display, &view).expect("drawing into the OLED buffer must succeed");
-            match display.flush() {
-                Ok(()) => {
-                    log::info!(
-                        "OLED render: state={} preset={} time={}",
-                        view.state_label,
-                        view.preset_name,
-                        view.time.as_str()
-                    );
-                    render_pending = false;
-                    rendered_second = Some(visible_second);
+            if let Some(display) = display.as_mut() {
+                display.clear_buffer();
+                draw_view(display, &view).expect("drawing into the OLED buffer must succeed");
+                match display.flush() {
+                    Ok(()) => {
+                        log::info!(
+                            "OLED render: state={} preset={} time={}",
+                            view.state_label,
+                            view.preset_name,
+                            view.time.as_str()
+                        );
+                        render_pending = false;
+                        rendered_second = Some(visible_second);
+                    }
+                    Err(error) => {
+                        log::error!(
+                            "OLED render failed: {error:?}; timer state retained, retrying newest snapshot"
+                        );
+                        next_render_attempt_ms = now_ms.saturating_add(RENDER_RETRY_MS);
+                    }
                 }
-                Err(error) => {
-                    log::error!(
-                        "OLED render failed: {error:?}; timer state retained, retrying newest snapshot"
-                    );
-                    next_render_attempt_ms = now_ms.saturating_add(RENDER_RETRY_MS);
-                }
+            } else {
+                render_pending = false;
+                rendered_second = Some(visible_second);
             }
         }
 
@@ -464,6 +628,15 @@ fn process_protocol_message(
             return;
         }
     };
+    log::info!(
+        "BLE protocol request: transfer={} request_id={} kind={} version={}.{} bytes={}",
+        request_transfer_id,
+        request.request_id,
+        request.request.message_kind(),
+        request.version.major,
+        request.version.minor,
+        bytes.len()
+    );
     let action = session.handle(&request);
     let response = match action {
         ProtocolAction::Respond(response) => response,
@@ -580,6 +753,22 @@ fn process_protocol_message(
             return;
         }
     };
+    let response_kind = match &response.response {
+        Response::Hello(_) => 2,
+        Response::Status(_) => 4,
+        Response::SessionPage(_) => 6,
+        Response::ClockAnchor(_) => 8,
+        Response::Error(_) => 255,
+    };
+    log::info!(
+        "BLE protocol response: transfer={} request_id={} kind={} version={}.{} bytes={}",
+        request_transfer_id,
+        response.request_id,
+        response_kind,
+        response.version.major,
+        response.version.minor,
+        length
+    );
     if let Err(error) = radio.queue_response(&encoded[..length], request_transfer_id) {
         log::warn!(
             "BLE logical response could not enter bounded outbox: request_id={} error={error:?}",
@@ -588,6 +777,20 @@ fn process_protocol_message(
         radio.abandon_response();
     }
 }
+
+#[cfg(feature = "acceptance-diagnostic")]
+fn log_resource_snapshot(phase: &str) {
+    let snapshot = focus_esp_resources::snapshot();
+    log::info!(
+        "resource snapshot: phase={phase} heap_free_8bit={} heap_minimum_8bit={} main_stack_minimum_free={}",
+        snapshot.heap_free_8bit,
+        snapshot.heap_minimum_8bit,
+        snapshot.current_stack_minimum_free
+    );
+}
+
+#[cfg(not(feature = "acceptance-diagnostic"))]
+fn log_resource_snapshot(_phase: &str) {}
 
 fn protocol_error(
     request_id: u32,

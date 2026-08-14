@@ -1,0 +1,4 @@
+Error:   × Failed to open serial port /dev/cu.usbmodem101
+  ├─▶ Error while connecting to device
+  ╰─▶ Operation not permitted
+

@@ -71,6 +71,50 @@ This source image and the production firmware compile cleanly. Physical iPhone
 discovery/write/notify/re-advertise evidence remains open until the board is
 connected and the diagnostic is run.
 
+## Reproducible physical acceptance runner
+
+Use the root runner for the remaining physical OpenSpec checks. It accepts a
+closed list of production and diagnostic modes, builds offline, copies the
+exact ELF into a timestamped evidence directory, and records the commit,
+worktree state, checksum, byte size, board information, flash transcript, and
+optional serial transcript. Merely building an image never looks for or flashes
+a controller:
+
+```sh
+source "$HOME/.cargo/env"
+source "$HOME/export-esp.sh"
+
+# Safe without hardware: prepare the exact echo image and manifest only.
+./scripts/ble-acceptance.sh --mode ble-echo
+
+# With one controller connected to its native USB connector:
+./scripts/ble-acceptance.sh --mode ble-echo --flash --monitor
+
+# Short integrated timer lifecycle with production BLE/journal adapters:
+./scripts/ble-acceptance.sh --mode acceptance --flash --monitor
+```
+
+Supported modes are `production`, `acceptance`, `ble-echo`, `journal-fill`,
+`journal-corrupt`, and `journal-clear`. Auto-selection refuses to continue when
+zero or multiple `/dev/cu.usbmodem...` devices exist; pass `--port` to resolve
+the latter deliberately. `--monitor` implies `--flash`. Evidence defaults to
+`docs/hardware-evidence/ble-sync/<UTC timestamp>-<mode>` for physical flashes;
+build-only preparation defaults to the system temporary directory so it does
+not dirty the repository. Either can be redirected with `--evidence-root`.
+
+The runner deliberately never edits `tasks.md` and never labels a run as
+passed. Review the transcript together with the visible OLED, encoder, buzzer,
+iPhone, and (for current) meter observations, then record those observations in
+the acceptance ledger. Diagnostic images remain installed after their run, so
+always finish the sequence by flashing `--mode production`.
+
+`acceptance-diagnostic` alone enables the narrow `focus-esp-resources` adapter.
+That isolated crate contains the single audited ESP-IDF FFI block used to read
+heap and current-task stack high-water counters; the main workspace retains its
+`unsafe_code = "forbid"` policy. Default production features neither compile
+nor link the adapter. `check-device.sh` still verifies its formatting, while
+the target acceptance build proves the actual ESP symbol linkage.
+
 ## Verification commands
 
 ```sh

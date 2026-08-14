@@ -1,0 +1,366 @@
+Commands:
+    CTRL+R    Reset chip
+    CTRL+C    Exit
+
+ESP-ROM:esp32c3-api1-20210207
+Build:Feb  7 2021
+rst:0x15 (USB_UART_CHIP_RESET),boot:0xd (SPI_FAST_FLASH_BOOT)
+Saved PC:0x40380862
+SPIWP:0xee
+mode:DIO, clock div:2
+load:0x3fcd5820,len:0x15c4
+load:0x403cbf10,len:0xc84
+load:0x403ce710,len:0x2fd0
+entry 0x403cbf1a
+I (24) boot: ESP-IDF v5.5.1-838-gd66ebb86d2e 2nd stage bootloader
+I (25) boot: compile time Nov 26 2025 12:25:17
+I (25) boot: chip revision: v0.4
+I (26) boot: efuse block revision: v1.3
+I (30) boot.esp32c3: SPI Speed      : 40MHz
+I (34) boot.esp32c3: SPI Mode       : DIO
+I (37) boot.esp32c3: SPI Flash Size : 4MB
+I (41) boot: Enabling RNG early entropy source...
+I (46) boot: Partition Table:
+I (48) boot: ## Label            Usage          Type ST Offset   Length
+I (54) boot:  0 nvs              WiFi data        01 02 00009000 00006000
+I (61) boot:  1 phy_init         RF data          01 01 0000f000 00001000
+I (67) boot:  2 factory          factory app      00 00 00010000 003f0000
+I (74) boot: End of partition table
+I (77) esp_image: segment 0: paddr=00010020 vaddr=3c0c0020 size=450f4h (282868) map
+I (147) esp_image: segment 1: paddr=0005511c vaddr=3fc92c00 size=02b40h ( 11072) load
+I (150) esp_image: segment 2: paddr=00057c64 vaddr=40380000 size=083b4h ( 33716) load
+I (159) esp_image: segment 3: paddr=00060020 vaddr=42000020 size=b0dbch (724412) map
+I (317) esp_image: segment 4: paddr=00110de4 vaddr=403883b4 size=0a7d8h ( 42968) load
+I (328) esp_image: segment 5: paddr=0011b5c4 vaddr=50000000 size=00020h (    32) load
+I (334) boot: Loaded app from partition at offset 0x10000
+I (334) boot: Disabling RNG early entropy source...
+I (346) cpu_start: Unicore app
+I (354) cpu_start: Pro cpu start user code
+I (354) cpu_start: cpu freq: 160000000 Hz
+I (354) app_init: Application information:
+I (355) app_init: Project name:     libespidf
+I (355) app_init: App version:      0c7ebc1-dirty
+I (355) app_init: Compile time:     Aug 14 2026 14:55:37
+I (355) app_init: ELF file SHA256:  eef05dbf9...
+I (355) app_init: ESP-IDF:          v5.5.3
+I (355) efuse_init: Min chip rev:     v0.3
+I (355) efuse_init: Max chip rev:     v1.99 
+I (355) efuse_init: Chip rev:         v0.4
+I (356) heap_init: Initializing. RAM available for dynamic allocation:
+I (356) heap_init: At 3FC96DF0 len 00029210 (164 KiB): RAM
+I (356) heap_init: At 3FCC0000 len 0001C710 (113 KiB): Retention RAM
+I (356) heap_init: At 3FCDC710 len 00002950 (10 KiB): Retention RAM
+I (356) heap_init: At 50000020 len 00001FC8 (7 KiB): RTCRAM
+I (358) spi_flash: detected chip: generic
+I (358) spi_flash: flash io: dio
+W (358) i2c: This driver is an old driver, please migrate your application code to adapt `driver/i2c_master.h`
+I (359) sleep_gpio: Configure to isolate all GPIO pins in sleep state
+I (359) sleep_gpio: Enable automatic switching of GPIO sleep configuration
+I (361) main_task: Started on CPU0
+I (361) main_task: Calling app_main()
+I (363) focus_firmware: focus-firmware 0.1.0 booting on ESP32-C3; reset_reason=USBPeripheral
+I (365) focus_firmware::runtime: runtime stage: peripherals acquired
+I (366) focus_firmware::runtime: runtime stage: encoder and buzzer GPIO configured
+I (367) focus_firmware::runtime: runtime stage: probing OLED at 0x3C
+I (376) focus_firmware::runtime: runtime stage: OLED initialized
+I (377) focus_firmware::runtime: runtime stage: opening persistent stores
+I (471) focus_firmware::runtime: session journal ready: device=[8f, 32, 6f, 0b, 85, bd, c7, 02, 54, 5b, 53, ce, 6f, 26, 6d, 13] epoch=[00, 6e, c3, bb, 47, 70, 8d, 74] bounds=(Some(132), Some(195)) health=Healthy init=InitReport { identity: Existing, epoch: Existing, metadata: Clean, invalid_slot_count: 0 }
+I (475) focus_firmware::runtime: settings record loaded from NVS
+I (476) BLE_INIT: BT controller compile version [1bb2f50]
+I (477) BLE_INIT: Using main XTAL as clock source
+I (478) BLE_INIT: Feature Config, ADV:1, BLE_50:1, DTM:1, SCAN:1, CCA:0, SMP:1, CONNECT:1
+I (479) BLE_INIT: Bluetooth MAC: 08:92:72:9d:24:b2
+I (481) phy_init: phy_version 1232,d493f299,Aug 25 2025,19:01:20
+I (524) esp32_nimble::ble_device: BLE Host Task Started
+I (529) NimBLE: GAP procedure initiated: stop advertising.
+
+I (531) esp32_nimble::ble_device: Device Address: 8:92:72:9D:24:B2
+I (536) NimBLE: GAP procedure initiated: advertise; 
+I (536) NimBLE: disc_mode=2
+I (537) NimBLE:  adv_channel_map=0 own_addr_type=0 adv_filter_policy=0 adv_itvl_min=0 adv_itvl_max=0
+I (537) NimBLE: 
+
+I (540) focus_firmware::ble_radio: BLE advertising started: name=FocusTimer preferred_mtu=185 max_connections=1
+I (541) focus_firmware::runtime: integrated runtime ready: OLED=0x3C GPIO6/GPIO7; EC11 S1=GPIO0 S2=GPIO4 KEY=GPIO5; active buzzer=GPIO1 through 330 ohm; boot levels S1=true S2=true KEY=true
+I (543) focus_firmware::runtime: resource snapshot: phase=idle-ready heap_free_8bit=137712 heap_minimum_8bit=137712 main_stack_minimum_free=30016
+W (544) focus_firmware::runtime: ACCEPTANCE DIAGNOSTIC: all five presets are temporarily shortened to 8 seconds
+I (663) focus_firmware::runtime: OLED render: state=READY preset=Quick Sprint time=00:08
+I (120110) focus_firmware::ble_radio: BLE connected: generation=1 handle=1 mtu=23
+W (120112) esp32_nimble::server::ble_server: unhandled event: 38
+I (120114) focus_firmware::runtime: BLE protocol session reset for connection generation=1 connected=true subscribed=false mtu=23
+I (120117) focus_firmware::runtime: resource snapshot: phase=connected heap_free_8bit=137636 heap_minimum_8bit=137592 main_stack_minimum_free=30016
+I (120470) esp32_nimble::server::ble_server: mtu update event; conn_handle=1 mtu=185
+I (121100) focus_firmware::ble_radio: BLE response subscription: handle=1 mtu=185 enabled=true
+I (121162) focus_firmware::runtime: BLE protocol request: transfer=1 request_id=1 kind=1 version=1.0 bytes=11
+I (121164) focus_firmware::runtime: BLE protocol response: transfer=1 request_id=1 kind=2 version=1.0 bytes=57
+I (121165) NimBLE: GATT procedure initiated: notify; 
+I (121166) NimBLE: att_handle=16
+
+I (121168) focus_firmware::ble_radio: BLE logical response transfer: bytes=57 frames=1 elapsed_ms=2
+I (121171) focus_firmware::runtime: resource snapshot: phase=transfer-complete heap_free_8bit=137492 heap_minimum_8bit=135384 main_stack_minimum_free=30016
+I (121220) focus_firmware::ble_radio: BLE response subscription: handle=1 mtu=185 enabled=false
+I (121280) focus_firmware::ble_radio: BLE response subscription: handle=1 mtu=185 enabled=true
+I (121342) focus_firmware::runtime: BLE protocol request: transfer=2 request_id=2 kind=7 version=1.0 bytes=21
+I (121344) focus_firmware::runtime: BLE protocol response: transfer=2 request_id=2 kind=8 version=1.0 bytes=27
+I (121345) NimBLE: GATT procedure initiated: notify; 
+I (121346) NimBLE: att_handle=16
+
+I (121348) focus_firmware::ble_radio: BLE logical response transfer: bytes=27 frames=1 elapsed_ms=2
+I (121350) focus_firmware::runtime: resource snapshot: phase=transfer-complete heap_free_8bit=137496 heap_minimum_8bit=135384 main_stack_minimum_free=30016
+I (121400) focus_firmware::ble_radio: BLE response subscription: handle=1 mtu=185 enabled=false
+I (121460) focus_firmware::ble_radio: BLE response subscription: handle=1 mtu=185 enabled=true
+I (121522) focus_firmware::runtime: BLE protocol request: transfer=3 request_id=3 kind=3 version=1.0 bytes=11
+I (121524) focus_firmware::runtime: BLE protocol response: transfer=3 request_id=3 kind=4 version=1.0 bytes=73
+I (121526) NimBLE: GATT procedure initiated: notify; 
+I (121526) NimBLE: att_handle=16
+
+I (121528) focus_firmware::ble_radio: BLE logical response transfer: bytes=73 frames=1 elapsed_ms=2
+I (121531) focus_firmware::runtime: resource snapshot: phase=transfer-complete heap_free_8bit=137452 heap_minimum_8bit=135344 main_stack_minimum_free=30016
+I (121580) focus_firmware::ble_radio: BLE response subscription: handle=1 mtu=185 enabled=false
+I (121640) focus_firmware::ble_radio: BLE response subscription: handle=1 mtu=185 enabled=true
+I (121702) focus_firmware::runtime: BLE protocol request: transfer=4 request_id=4 kind=5 version=1.0 bytes=25
+I (121705) focus_firmware::runtime: BLE protocol response: transfer=4 request_id=4 kind=6 version=1.0 bytes=356
+I (121707) NimBLE: GATT procedure initiated: notify; 
+I (121708) NimBLE: att_handle=16
+
+I (121712) NimBLE: GATT procedure initiated: notify; 
+I (121712) NimBLE: att_handle=16
+
+I (121715) NimBLE: GATT procedure initiated: notify; 
+I (121716) NimBLE: att_handle=16
+
+I (121718) focus_firmware::ble_radio: BLE logical response transfer: bytes=356 frames=3 elapsed_ms=10
+I (121720) focus_firmware::runtime: resource snapshot: phase=transfer-complete heap_free_8bit=137116 heap_minimum_8bit=135008 main_stack_minimum_free=30016
+I (121760) focus_firmware::ble_radio: BLE response subscription: handle=1 mtu=185 enabled=false
+I (121820) focus_firmware::ble_radio: BLE response subscription: handle=1 mtu=185 enabled=true
+I (121882) focus_firmware::runtime: BLE protocol request: transfer=5 request_id=5 kind=5 version=1.0 bytes=26
+I (121885) focus_firmware::runtime: BLE protocol response: transfer=5 request_id=5 kind=6 version=1.0 bytes=356
+I (121887) NimBLE: GATT procedure initiated: notify; 
+I (121888) NimBLE: att_handle=16
+
+I (121892) NimBLE: GATT procedure initiated: notify; 
+I (121892) NimBLE: att_handle=16
+
+I (121895) NimBLE: GATT procedure initiated: notify; 
+I (121896) NimBLE: att_handle=16
+
+I (121898) focus_firmware::ble_radio: BLE logical response transfer: bytes=356 frames=3 elapsed_ms=10
+I (121900) focus_firmware::runtime: resource snapshot: phase=transfer-complete heap_free_8bit=137116 heap_minimum_8bit=135008 main_stack_minimum_free=30016
+I (121940) focus_firmware::ble_radio: BLE response subscription: handle=1 mtu=185 enabled=false
+I (122000) focus_firmware::ble_radio: BLE response subscription: handle=1 mtu=185 enabled=true
+I (122062) focus_firmware::runtime: BLE protocol request: transfer=6 request_id=6 kind=5 version=1.0 bytes=26
+I (122065) focus_firmware::runtime: BLE protocol response: transfer=6 request_id=6 kind=6 version=1.0 bytes=356
+I (122067) NimBLE: GATT procedure initiated: notify; 
+I (122068) NimBLE: att_handle=16
+
+I (122072) NimBLE: GATT procedure initiated: notify; 
+I (122072) NimBLE: att_handle=16
+
+I (122075) NimBLE: GATT procedure initiated: notify; 
+I (122076) NimBLE: att_handle=16
+
+I (122078) focus_firmware::ble_radio: BLE logical response transfer: bytes=356 frames=3 elapsed_ms=10
+I (122080) focus_firmware::runtime: resource snapshot: phase=transfer-complete heap_free_8bit=137116 heap_minimum_8bit=135008 main_stack_minimum_free=30016
+I (122120) focus_firmware::ble_radio: BLE response subscription: handle=1 mtu=185 enabled=false
+I (122180) focus_firmware::ble_radio: BLE response subscription: handle=1 mtu=185 enabled=true
+I (122242) focus_firmware::runtime: BLE protocol request: transfer=7 request_id=7 kind=5 version=1.0 bytes=26
+I (122245) focus_firmware::runtime: BLE protocol response: transfer=7 request_id=7 kind=6 version=1.0 bytes=356
+I (122247) NimBLE: GATT procedure initiated: notify; 
+I (122248) NimBLE: att_handle=16
+
+I (122252) NimBLE: GATT procedure initiated: notify; 
+I (122252) NimBLE: att_handle=16
+
+I (122255) NimBLE: GATT procedure initiated: notify; 
+I (122256) NimBLE: att_handle=16
+
+I (122258) focus_firmware::ble_radio: BLE logical response transfer: bytes=356 frames=3 elapsed_ms=10
+I (122260) focus_firmware::runtime: resource snapshot: phase=transfer-complete heap_free_8bit=137116 heap_minimum_8bit=135008 main_stack_minimum_free=30016
+I (122330) focus_firmware::ble_radio: BLE response subscription: handle=1 mtu=185 enabled=false
+I (122390) focus_firmware::ble_radio: BLE response subscription: handle=1 mtu=185 enabled=true
+I (122452) focus_firmware::runtime: BLE protocol request: transfer=8 request_id=8 kind=5 version=1.0 bytes=26
+I (122455) focus_firmware::runtime: BLE protocol response: transfer=8 request_id=8 kind=6 version=1.0 bytes=356
+I (122457) NimBLE: GATT procedure initiated: notify; 
+I (122458) NimBLE: att_handle=16
+
+I (122462) NimBLE: GATT procedure initiated: notify; 
+I (122462) NimBLE: att_handle=16
+
+I (122465) NimBLE: GATT procedure initiated: notify; 
+I (122466) NimBLE: att_handle=16
+
+I (122468) focus_firmware::ble_radio: BLE logical response transfer: bytes=356 frames=3 elapsed_ms=10
+I (122470) focus_firmware::runtime: resource snapshot: phase=transfer-complete heap_free_8bit=137116 heap_minimum_8bit=135008 main_stack_minimum_free=30016
+I (122510) focus_firmware::ble_radio: BLE response subscription: handle=1 mtu=185 enabled=false
+I (122570) focus_firmware::ble_radio: BLE response subscription: handle=1 mtu=185 enabled=true
+I (122632) focus_firmware::runtime: BLE protocol request: transfer=9 request_id=9 kind=5 version=1.0 bytes=26
+I (122635) focus_firmware::runtime: BLE protocol response: transfer=9 request_id=9 kind=6 version=1.0 bytes=356
+I (122637) NimBLE: GATT procedure initiated: notify; 
+I (122638) NimBLE: att_handle=16
+
+I (122642) NimBLE: GATT procedure initiated: notify; 
+I (122642) NimBLE: att_handle=16
+
+I (122645) NimBLE: GATT procedure initiated: notify; 
+I (122646) NimBLE: att_handle=16
+
+I (122648) focus_firmware::ble_radio: BLE logical response transfer: bytes=356 frames=3 elapsed_ms=10
+I (122650) focus_firmware::runtime: resource snapshot: phase=transfer-complete heap_free_8bit=137116 heap_minimum_8bit=135008 main_stack_minimum_free=30016
+I (122690) focus_firmware::ble_radio: BLE response subscription: handle=1 mtu=185 enabled=false
+I (122750) focus_firmware::ble_radio: BLE response subscription: handle=1 mtu=185 enabled=true
+I (122812) focus_firmware::runtime: BLE protocol request: transfer=10 request_id=10 kind=5 version=1.0 bytes=26
+I (122815) focus_firmware::runtime: BLE protocol response: transfer=10 request_id=10 kind=6 version=1.0 bytes=356
+I (122817) NimBLE: GATT procedure initiated: notify; 
+I (122818) NimBLE: att_handle=16
+
+I (122822) NimBLE: GATT procedure initiated: notify; 
+I (122822) NimBLE: att_handle=16
+
+I (122825) NimBLE: GATT procedure initiated: notify; 
+I (122826) NimBLE: att_handle=16
+
+I (122828) focus_firmware::ble_radio: BLE logical response transfer: bytes=356 frames=3 elapsed_ms=10
+I (122830) focus_firmware::runtime: resource snapshot: phase=transfer-complete heap_free_8bit=137116 heap_minimum_8bit=135008 main_stack_minimum_free=30016
+I (122870) focus_firmware::ble_radio: BLE response subscription: handle=1 mtu=185 enabled=false
+I (122930) focus_firmware::ble_radio: BLE response subscription: handle=1 mtu=185 enabled=true
+I (122992) focus_firmware::runtime: BLE protocol request: transfer=11 request_id=11 kind=5 version=1.0 bytes=26
+I (122995) focus_firmware::runtime: BLE protocol response: transfer=11 request_id=11 kind=6 version=1.0 bytes=353
+I (122997) NimBLE: GATT procedure initiated: notify; 
+I (122998) NimBLE: att_handle=16
+
+I (123002) NimBLE: GATT procedure initiated: notify; 
+I (123002) NimBLE: att_handle=16
+
+I (123005) NimBLE: GATT procedure initiated: notify; 
+I (123006) NimBLE: att_handle=16
+
+I (123008) focus_firmware::ble_radio: BLE logical response transfer: bytes=353 frames=3 elapsed_ms=10
+I (123010) focus_firmware::runtime: resource snapshot: phase=transfer-complete heap_free_8bit=137120 heap_minimum_8bit=135008 main_stack_minimum_free=30016
+I (123050) focus_firmware::ble_radio: BLE response subscription: handle=1 mtu=185 enabled=false
+I (126174) focus_firmware::runtime: input event: RotateRight
+I (126175) focus_firmware::runtime: selection save scheduled after quiet time: deep-work
+I (126293) focus_firmware::runtime: OLED render: state=READY preset=Deep Work time=00:08
+I (127177) focus_firmware::runtime: saved selected preset to NVS: deep-work
+I (127504) focus_firmware::runtime: input event: RotateLeft
+I (127505) focus_firmware::runtime: selection save scheduled after quiet time: quick-sprint
+I (127623) focus_firmware::runtime: OLED render: state=READY preset=Quick Sprint time=00:08
+I (128114) focus_firmware::runtime: input event: RotateLeft
+I (128115) focus_firmware::runtime: selection save scheduled after quiet time: reading
+I (128233) focus_firmware::runtime: OLED render: state=READY preset=Reading time=00:08
+I (129118) focus_firmware::runtime: saved selected preset to NVS: reading
+I (130073) focus_firmware::runtime: input event: RotateRight
+I (130074) focus_firmware::runtime: selection save scheduled after quiet time: quick-sprint
+I (130192) focus_firmware::runtime: OLED render: state=READY preset=Quick Sprint time=00:08
+I (130569) focus_firmware::runtime: input event: RotateRight
+I (130570) focus_firmware::runtime: selection save scheduled after quiet time: deep-work
+I (130688) focus_firmware::runtime: OLED render: state=READY preset=Deep Work time=00:08
+I (131033) focus_firmware::runtime: input event: RotateRight
+I (131034) focus_firmware::runtime: selection save scheduled after quiet time: focus
+I (131151) focus_firmware::runtime: OLED render: state=READY preset=Focus time=00:08
+I (131550) focus_firmware::runtime: input event: RotateLeft
+I (131551) focus_firmware::runtime: selection save scheduled after quiet time: deep-work
+I (131669) focus_firmware::runtime: OLED render: state=READY preset=Deep Work time=00:08
+I (132553) focus_firmware::runtime: saved selected preset to NVS: deep-work
+I (133494) focus_firmware::runtime: input event: RotateLeft
+I (133495) focus_firmware::runtime: selection save scheduled after quiet time: quick-sprint
+I (133613) focus_firmware::runtime: OLED render: state=READY preset=Quick Sprint time=00:08
+I (134497) focus_firmware::runtime: saved selected preset to NVS: quick-sprint
+I (134752) focus_firmware::runtime: input event: Press
+I (134753) focus_firmware::runtime: buzzer feedback started: Start
+I (134872) focus_firmware::runtime: OLED render: state=FOCUS preset=Quick Sprint time=00:08
+I (135870) focus_firmware::runtime: OLED render: state=FOCUS preset=Quick Sprint time=00:07
+I (136870) focus_firmware::runtime: OLED render: state=FOCUS preset=Quick Sprint time=00:06
+I (137870) focus_firmware::runtime: OLED render: state=FOCUS preset=Quick Sprint time=00:05
+I (137898) focus_firmware::runtime: input event: Press
+I (138017) focus_firmware::runtime: OLED render: state=PAUSED preset=Quick Sprint time=00:05
+I (139179) focus_firmware::runtime: committed session outcome queued for journal append
+I (139180) focus_firmware::runtime: input event: LongPress
+I (139186) focus_firmware::runtime: session journal append committed: sequence=196
+I (139305) focus_firmware::runtime: OLED render: state=READY preset=Quick Sprint time=00:08
+I (205971) focus_firmware::ble_radio: BLE disconnected: generation=2 handle=1 reason=Err(Remote User Terminated Connection)
+I (205972) NimBLE: GAP procedure initiated: advertise; 
+I (205973) NimBLE: disc_mode=2
+I (205973) NimBLE:  adv_channel_map=0 own_addr_type=0 adv_filter_policy=0 adv_itvl_min=0 adv_itvl_max=0
+I (205973) NimBLE: 
+
+I (205976) focus_firmware::runtime: BLE protocol session reset for connection generation=2 connected=false subscribed=false mtu=23
+I (205979) focus_firmware::runtime: resource snapshot: phase=disconnected heap_free_8bit=137548 heap_minimum_8bit=135008 main_stack_minimum_free=30016
+I (210111) focus_firmware::ble_radio: BLE connected: generation=3 handle=1 mtu=23
+W (210112) esp32_nimble::server::ble_server: unhandled event: 38
+I (210114) focus_firmware::runtime: BLE protocol session reset for connection generation=3 connected=true subscribed=false mtu=23
+I (210117) focus_firmware::runtime: resource snapshot: phase=connected heap_free_8bit=137548 heap_minimum_8bit=135008 main_stack_minimum_free=30016
+I (210441) esp32_nimble::server::ble_server: mtu update event; conn_handle=1 mtu=185
+I (211071) focus_firmware::ble_radio: BLE response subscription: handle=1 mtu=185 enabled=true
+I (211163) focus_firmware::runtime: BLE protocol request: transfer=1 request_id=1 kind=1 version=1.0 bytes=11
+I (211164) focus_firmware::runtime: BLE protocol response: transfer=1 request_id=1 kind=2 version=1.0 bytes=57
+I (211166) NimBLE: GATT procedure initiated: notify; 
+I (211167) NimBLE: att_handle=16
+
+I (211169) focus_firmware::ble_radio: BLE logical response transfer: bytes=57 frames=1 elapsed_ms=2
+I (211171) focus_firmware::runtime: resource snapshot: phase=transfer-complete heap_free_8bit=137452 heap_minimum_8bit=135008 main_stack_minimum_free=30016
+I (211221) focus_firmware::ble_radio: BLE response subscription: handle=1 mtu=185 enabled=false
+I (211281) focus_firmware::ble_radio: BLE response subscription: handle=1 mtu=185 enabled=true
+I (211343) focus_firmware::runtime: BLE protocol request: transfer=2 request_id=2 kind=7 version=1.0 bytes=21
+W (211344) focus_firmware::runtime: BLE clock anchor rejected: UtcMovedBackwards
+I (211345) focus_firmware::runtime: BLE protocol response: transfer=2 request_id=2 kind=255 version=1.0 bytes=18
+I (211346) NimBLE: GATT procedure initiated: notify; 
+I (211347) NimBLE: att_handle=16
+
+I (211349) focus_firmware::ble_radio: BLE logical response transfer: bytes=18 frames=1 elapsed_ms=2
+I (211352) focus_firmware::runtime: resource snapshot: phase=transfer-complete heap_free_8bit=137488 heap_minimum_8bit=135008 main_stack_minimum_free=30016
+I (211401) focus_firmware::ble_radio: BLE response subscription: handle=1 mtu=185 enabled=false
+I (211403) focus_firmware::ble_radio: BLE disconnected: generation=4 handle=1 reason=Err(Remote User Terminated Connection)
+I (211404) NimBLE: GAP procedure initiated: advertise; 
+I (211404) NimBLE: disc_mode=2
+I (211404) NimBLE:  adv_channel_map=0 own_addr_type=0 adv_filter_policy=0 adv_itvl_min=0 adv_itvl_max=0
+I (211404) NimBLE: 
+
+I (211407) focus_firmware::runtime: BLE protocol session reset for connection generation=4 connected=false subscribed=false mtu=23
+I (211410) focus_firmware::runtime: resource snapshot: phase=disconnected heap_free_8bit=137548 heap_minimum_8bit=135008 main_stack_minimum_free=30016
+I (220491) focus_firmware::ble_radio: BLE connected: generation=5 handle=1 mtu=23
+W (220492) esp32_nimble::server::ble_server: unhandled event: 38
+I (220494) focus_firmware::runtime: BLE protocol session reset for connection generation=5 connected=true subscribed=false mtu=23
+I (220497) focus_firmware::runtime: resource snapshot: phase=connected heap_free_8bit=137548 heap_minimum_8bit=135008 main_stack_minimum_free=30016
+I (220821) esp32_nimble::server::ble_server: mtu update event; conn_handle=1 mtu=185
+I (221421) focus_firmware::ble_radio: BLE response subscription: handle=1 mtu=185 enabled=true
+I (221483) focus_firmware::runtime: BLE protocol request: transfer=3 request_id=1 kind=1 version=1.0 bytes=11
+I (221484) focus_firmware::runtime: BLE protocol response: transfer=3 request_id=1 kind=2 version=1.0 bytes=57
+I (221486) NimBLE: GATT procedure initiated: notify; 
+I (221487) NimBLE: att_handle=16
+
+I (221489) focus_firmware::ble_radio: BLE logical response transfer: bytes=57 frames=1 elapsed_ms=2
+I (221491) focus_firmware::runtime: resource snapshot: phase=transfer-complete heap_free_8bit=137452 heap_minimum_8bit=135008 main_stack_minimum_free=30016
+I (221541) focus_firmware::ble_radio: BLE response subscription: handle=1 mtu=185 enabled=false
+I (221601) focus_firmware::ble_radio: BLE response subscription: handle=1 mtu=185 enabled=true
+I (221663) focus_firmware::runtime: BLE protocol request: transfer=4 request_id=2 kind=7 version=1.0 bytes=21
+I (221664) focus_firmware::runtime: BLE protocol response: transfer=4 request_id=2 kind=8 version=1.0 bytes=27
+I (221666) NimBLE: GATT procedure initiated: notify; 
+I (221667) NimBLE: att_handle=16
+
+I (221668) focus_firmware::ble_radio: BLE logical response transfer: bytes=27 frames=1 elapsed_ms=2
+I (221671) focus_firmware::runtime: resource snapshot: phase=transfer-complete heap_free_8bit=137480 heap_minimum_8bit=135008 main_stack_minimum_free=30016
+I (221721) focus_firmware::ble_radio: BLE response subscription: handle=1 mtu=185 enabled=false
+I (221781) focus_firmware::ble_radio: BLE response subscription: handle=1 mtu=185 enabled=true
+I (221843) focus_firmware::runtime: BLE protocol request: transfer=5 request_id=3 kind=3 version=1.0 bytes=11
+I (221845) focus_firmware::runtime: BLE protocol response: transfer=5 request_id=3 kind=4 version=1.0 bytes=73
+I (221847) NimBLE: GATT procedure initiated: notify; 
+I (221847) NimBLE: att_handle=16
+
+I (221849) focus_firmware::ble_radio: BLE logical response transfer: bytes=73 frames=1 elapsed_ms=2
+I (221852) focus_firmware::runtime: resource snapshot: phase=transfer-complete heap_free_8bit=137436 heap_minimum_8bit=135008 main_stack_minimum_free=30016
+I (221901) focus_firmware::ble_radio: BLE response subscription: handle=1 mtu=185 enabled=false
+I (221991) focus_firmware::ble_radio: BLE response subscription: handle=1 mtu=185 enabled=true
+I (222053) focus_firmware::runtime: BLE protocol request: transfer=6 request_id=4 kind=5 version=1.0 bytes=26
+I (222056) focus_firmware::runtime: BLE protocol response: transfer=6 request_id=4 kind=6 version=1.0 bytes=97
+I (222058) NimBLE: GATT procedure initiated: notify; 
+I (222058) NimBLE: att_handle=16
+
+I (222060) focus_firmware::ble_radio: BLE logical response transfer: bytes=97 frames=1 elapsed_ms=2
+I (222063) focus_firmware::runtime: resource snapshot: phase=transfer-complete heap_free_8bit=137412 heap_minimum_8bit=135008 main_stack_minimum_free=30016
+I (222111) focus_firmware::ble_radio: BLE response subscription: handle=1 mtu=185 enabled=false
+I (254434) focus_firmware::runtime: input event: RotateRight
+I (254435) focus_firmware::runtime: selection save scheduled after quiet time: deep-work
+I (254553) focus_firmware::runtime: OLED render: state=READY preset=Deep Work time=00:08
+I (255372) focus_firmware::runtime: input event: RotateLeft
+I (255373) focus_firmware::runtime: selection already persisted: quick-sprint
+I (255491) focus_firmware::runtime: OLED render: state=READY preset=Quick Sprint time=00:08

@@ -73,6 +73,11 @@ class ProtocolTransport implements DeviceTransport {
   subscribeToDisconnect() {
     return () => undefined;
   }
+
+  subscribeToAvailability(listener: (state: { status: 'available' }) => void) {
+    listener({ status: 'available' });
+    return () => undefined;
+  }
 }
 
 describe('DeviceClient', () => {

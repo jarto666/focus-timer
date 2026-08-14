@@ -1,0 +1,17 @@
+[package]
+name = "focus-esp-resources"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+rust-version = "1.85"
+publish = false
+
+[dependencies]
+esp-idf-svc = { version = "=0.52.1", features = ["critical-section"] }
+
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }

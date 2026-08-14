@@ -12,13 +12,22 @@ import {
 import {
   DeviceClientError,
   DeviceTransportError,
+  runProtocolFaultAcceptance,
   synchronizeForeground,
   type DeviceCandidate,
   type DeviceConnectionState,
   type DeviceTransport,
+  type DeviceTransportAvailability,
   type ReadyDevice,
 } from '@focus-timer/device-client';
-import { SessionOutcome, ViewState } from '@focus-timer/device-protocol';
+import {
+  MAX_RECORDS_PER_PAGE,
+  PROTOCOL_MAJOR,
+  PROTOCOL_MINOR,
+  SessionOutcome,
+  ViewState,
+  encodeRequest,
+} from '@focus-timer/device-protocol';
 import {
   createProtocolMockTransport,
   getMockScenario,
@@ -27,7 +36,7 @@ import {
 } from '@focus-timer/mock-device';
 
 import { runtimeConfig } from '@/config/runtime';
-import { createBleDeviceTransport } from '@/ble/ble-device-transport';
+import { BleDeviceTransport, createBleDeviceTransport } from '@/ble/ble-device-transport';
 import {
   openSessionRepository,
   type SqliteSessionRepository,
@@ -166,6 +175,9 @@ export function RuntimeProvider({ children }: PropsWithChildren) {
   const repository = useRef<SqliteSessionRepository | null>(null);
   const currentDevice = useRef<ReadyDevice | null>(null);
   const candidates = useRef(new Map<string, DeviceCandidate>());
+  const automaticReconnectAttempt = useRef<string | null>(null);
+  const physicalAcceptanceRun = useRef(false);
+  const latestAvailability = useRef<DeviceTransportAvailability>({ status: 'available' });
 
   useEffect(() => {
     let active = true;
@@ -196,12 +208,56 @@ export function RuntimeProvider({ children }: PropsWithChildren) {
 
   useEffect(() => {
     return backend.transport.subscribeToDisconnect(() => {
+      const availability = latestAvailability.current;
+      if (availability.status === 'unavailable') {
+        setConnection({ phase: 'unavailable', reason: availability.reason });
+        setStatus(null);
+        return;
+      }
+      if (availability.status === 'permission-denied') {
+        setConnection({
+          phase: 'permission-denied',
+          canOpenSettings: availability.canOpenSettings,
+        });
+        setStatus(null);
+        return;
+      }
       setConnection({
         phase: 'disconnected',
         reason: 'link-loss',
         lastDevice: currentDevice.current,
       });
       setStatus(null);
+    });
+  }, [backend]);
+
+  useEffect(() => {
+    return backend.transport.subscribeToAvailability((availability) => {
+      latestAvailability.current = availability;
+      if (availability.status === 'available') {
+        setConnection((current) => {
+          if (current.phase !== 'unavailable' && current.phase !== 'permission-denied') {
+            return current;
+          }
+          automaticReconnectAttempt.current = null;
+          return {
+            phase: 'disconnected',
+            reason: 'initial',
+            lastDevice: currentDevice.current,
+          };
+        });
+        return;
+      }
+
+      setStatus(null);
+      if (availability.status === 'unavailable') {
+        setConnection({ phase: 'unavailable', reason: availability.reason });
+      } else {
+        setConnection({
+          phase: 'permission-denied',
+          canOpenSettings: availability.canOpenSettings,
+        });
+      }
     });
   }, [backend]);
 
@@ -268,7 +324,7 @@ export function RuntimeProvider({ children }: PropsWithChildren) {
           backend.transport,
           candidate,
           repository.current,
-          Date.now(),
+          Date.now,
           operation,
         );
         const device = readyDevice(result.device)!;
@@ -277,6 +333,34 @@ export function RuntimeProvider({ children }: PropsWithChildren) {
         setStatus(statusModel(result.status));
         setHistory(await loadHistory(repository.current, result.deviceId));
         setHistorySync({ phase: 'ready' });
+        if (
+          runtimeConfig.bleAcceptanceDiagnostic === 'fault-matrix' &&
+          backend.transport instanceof BleDeviceTransport &&
+          !physicalAcceptanceRun.current
+        ) {
+          physicalAcceptanceRun.current = true;
+          console.info('[BLE acceptance] starting physical read-only fault matrix');
+          const corruptFrame = await backend.transport.writeCorruptFrameForAcceptance(operation);
+          const protocolFaults = await runProtocolFaultAcceptance(backend.transport, operation);
+          const pageRequest = encodeRequest({
+            version: { major: PROTOCOL_MAJOR, minor: PROTOCOL_MINOR },
+            requestId: 0xfa00_0100,
+            request: {
+              type: 'getSessionPage',
+              page: { afterSequence: 0, limit: MAX_RECORDS_PER_PAGE },
+            },
+          });
+          await backend.transport.disconnectDuringResponseForAcceptance(pageRequest, operation);
+          console.info(
+            `[BLE acceptance] complete ${JSON.stringify({ corruptFrame, ...protocolFaults, disconnectedDuringResponse: true })}`,
+          );
+          setConnection({
+            phase: 'disconnected',
+            reason: 'link-loss',
+            lastDevice: currentDevice.current,
+          });
+          setStatus(null);
+        }
       } catch (error) {
         if (error instanceof DeviceClientError && error.code === 'incompatible') {
           await backend.transport.disconnect();
@@ -298,6 +382,23 @@ export function RuntimeProvider({ children }: PropsWithChildren) {
     },
     [backend],
   );
+
+  useEffect(() => {
+    if (
+      runtimeConfig.deviceBackend !== 'ble' ||
+      historySync.phase !== 'ready' ||
+      connection.phase !== 'disconnected' ||
+      connection.reason !== 'initial' ||
+      connection.lastDevice === null
+    ) {
+      return;
+    }
+
+    const reconnectKey = `${connection.lastDevice.deviceId}:${connection.lastDevice.transportId}`;
+    if (automaticReconnectAttempt.current === reconnectKey) return;
+    automaticReconnectAttempt.current = reconnectKey;
+    void connect(connection.lastDevice.transportId);
+  }, [connect, connection, historySync.phase]);
 
   const disconnect = useCallback(async () => {
     try {

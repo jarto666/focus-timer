@@ -1,0 +1,5 @@
+ M .gitignore
+ M docs/ble-development.md
+ M docs/ble-sync-acceptance.md
+ M scripts/README.md
+?? scripts/ble-acceptance.sh

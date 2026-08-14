@@ -32,6 +32,7 @@ export const FOCUS_TIMER_RESPONSE_UUID = '2c4e304b-2581-481a-8646-89122d760711';
 const FALLBACK_GATT_VALUE_BYTES = 20;
 const MAXIMUM_GATT_VALUE_BYTES = 182;
 const STATE_SETTLE_MS = 2_000;
+const ACCEPTANCE_SUBSCRIPTION_SETTLE_MS = 100;
 
 type RejectInFlight = (error: DeviceTransportError) => void;
 
@@ -355,9 +356,172 @@ export class BleDeviceTransport implements DeviceTransport {
     }
   }
 
+  /** Sends one deliberately invalid GATT frame for an explicit bench run. */
+  async writeCorruptFrameForAcceptance(
+    operation: DeviceTransportOperation,
+  ): Promise<'gatt-rejected' | 'written'> {
+    this.assertOperation(operation, 'request-timeout');
+    const connected = this.connected;
+    if (connected === null || !(await connected.isConnected())) {
+      throw transportError('not-connected', true, 'Connect before running BLE acceptance');
+    }
+    if (this.requestInFlight) {
+      throw transportError('transport-failed', true, 'A Bluetooth request is already active');
+    }
+
+    this.requestInFlight = true;
+    const transactionId = `focus-acceptance-corrupt-${++this.transactionSequence}`;
+    const monitor = connected.monitorCharacteristicForService(
+      FOCUS_TIMER_SERVICE_UUID,
+      FOCUS_TIMER_RESPONSE_UUID,
+      () => undefined,
+      `${transactionId}-notify`,
+    );
+    try {
+      await delay(ACCEPTANCE_SUBSCRIPTION_SETTLE_MS);
+      try {
+        await connected.writeCharacteristicWithResponseForService(
+          FOCUS_TIMER_SERVICE_UUID,
+          FOCUS_TIMER_COMMAND_UUID,
+          bytesToBase64(Uint8Array.of(0xff)),
+          transactionId,
+        );
+        return 'written';
+      } catch {
+        return 'gatt-rejected';
+      }
+    } finally {
+      monitor.remove();
+      this.requestInFlight = false;
+      void this.manager.cancelTransaction(transactionId).catch(() => undefined);
+      await delay(ACCEPTANCE_SUBSCRIPTION_SETTLE_MS);
+    }
+  }
+
+  /**
+   * Disconnects after the first response notification of a multi-frame page.
+   * This deliberately exercises the firmware's dropped-notification path.
+   */
+  async disconnectDuringResponseForAcceptance(
+    payload: Uint8Array,
+    operation: DeviceTransportOperation,
+  ): Promise<void> {
+    this.assertOperation(operation, 'request-timeout');
+    const connected = this.connected;
+    if (connected === null || !(await connected.isConnected())) {
+      throw transportError('not-connected', true, 'Connect before running BLE acceptance');
+    }
+    if (this.requestInFlight) {
+      throw transportError('transport-failed', true, 'A Bluetooth request is already active');
+    }
+
+    this.requestInFlight = true;
+    this.nextRequestTransferId = nextTransferId(this.nextRequestTransferId);
+    const transferId = this.nextRequestTransferId;
+    const transactionId = `focus-acceptance-drop-${++this.transactionSequence}-${transferId}`;
+    let monitor: Subscription | undefined;
+    let settled = false;
+    let resolveDrop: (() => void) | undefined;
+    let rejectDrop: ((error: DeviceTransportError) => void) | undefined;
+    const firstNotification = new Promise<void>((resolve, reject) => {
+      resolveDrop = resolve;
+      rejectDrop = reject;
+    });
+
+    try {
+      monitor = connected.monitorCharacteristicForService(
+        FOCUS_TIMER_SERVICE_UUID,
+        FOCUS_TIMER_RESPONSE_UUID,
+        (error, characteristic) => {
+          if (settled) return;
+          if (error !== null) {
+            settled = true;
+            rejectDrop?.(
+              transportError(
+                'transport-failed',
+                true,
+                'Acceptance notification failed before disconnect',
+                error,
+              ),
+            );
+            return;
+          }
+          if (characteristic?.value === null || characteristic?.value === undefined) return;
+          try {
+            const frame = base64ToBytes(characteristic.value);
+            if (parseBleFrame(frame).header.transferId !== transferId) return;
+          } catch (cause) {
+            settled = true;
+            rejectDrop?.(
+              transportError(
+                'transport-failed',
+                true,
+                'Acceptance received a malformed notification',
+                cause,
+              ),
+            );
+            return;
+          }
+
+          settled = true;
+          void this.manager
+            .cancelDeviceConnection(connected.id)
+            .then(() => {
+              this.connected = null;
+              resolveDrop?.();
+            })
+            .catch((cause: unknown) => {
+              rejectDrop?.(
+                transportError(
+                  'transport-failed',
+                  true,
+                  'Acceptance could not disconnect after the first notification',
+                  cause,
+                ),
+              );
+            });
+        },
+        `${transactionId}-notify`,
+      );
+      await delay(ACCEPTANCE_SUBSCRIPTION_SETTLE_MS);
+
+      const fragmenter = new BleFragmenter(payload, transferId, gattValueCapacity(connected));
+      let frameIndex = 0;
+      for (
+        let frame = fragmenter.nextFrame();
+        frame !== undefined;
+        frame = fragmenter.nextFrame()
+      ) {
+        await connected.writeCharacteristicWithResponseForService(
+          FOCUS_TIMER_SERVICE_UUID,
+          FOCUS_TIMER_COMMAND_UUID,
+          bytesToBase64(frame),
+          `${transactionId}-write-${frameIndex++}`,
+        );
+      }
+      await this.withTimeout(
+        firstNotification,
+        operation.timeoutMs,
+        'request-timeout',
+        'Acceptance did not receive the first response notification',
+      );
+    } finally {
+      monitor?.remove();
+      this.requestInFlight = false;
+    }
+  }
+
   subscribeToDisconnect(listener: (event: DeviceTransportDisconnect) => void): () => void {
     this.disconnectListeners.add(listener);
     return () => this.disconnectListeners.delete(listener);
+  }
+
+  subscribeToAvailability(listener: (state: DeviceTransportAvailability) => void): () => void {
+    const subscription = this.manager.onStateChange(
+      (state) => listener(availabilityFor(state)),
+      true,
+    );
+    return () => subscription.remove();
   }
 
   private installDisconnectMonitor(device: Device): void {
@@ -420,6 +584,10 @@ export class BleDeviceTransport implements DeviceTransport {
   }
 }
 
-export function createBleDeviceTransport(): DeviceTransport {
+export function createBleDeviceTransport(): BleDeviceTransport {
   return new BleDeviceTransport();
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }

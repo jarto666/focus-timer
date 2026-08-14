@@ -13,3 +13,10 @@ dist/
 coverage/
 .playwright-cli/
 output/
+/docs/hardware-evidence/ble-sync/*/focus-firmware-*
+# Failed pre-fix reset loops are summarized in their observations; retaining
+# megabytes of repeated panic output would not add reviewable evidence.
+/docs/hardware-evidence/ble-sync/20260814T123856Z-acceptance/monitor.log
+/docs/hardware-evidence/ble-sync/20260814T124302Z-acceptance/monitor.log
+/docs/hardware-evidence/ble-sync/20260814T125221Z-acceptance/monitor.log
+/docs/hardware-evidence/ble-sync/20260814T125620Z-acceptance/monitor.log

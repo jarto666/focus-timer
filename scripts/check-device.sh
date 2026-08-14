@@ -11,6 +11,7 @@ fi
 
 cd "$REPO_ROOT/device"
 cargo fmt --all --check
+cargo fmt --manifest-path crates/focus-esp-resources/Cargo.toml --check
 cargo clippy -p focus-core --all-targets -- -D warnings
 cargo test -p focus-core
 cargo clippy -p focus-sync --all-targets -- -D warnings

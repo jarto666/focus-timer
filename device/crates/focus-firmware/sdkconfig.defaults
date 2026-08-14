@@ -1,5 +1,10 @@
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
-CONFIG_ESP_MAIN_TASK_STACK_SIZE=7000
+# The integrated owner loop, boxed journal handoff, and compact two-pass NVS
+# reconstruction have a static nested-frame peak of about 34 KiB in the
+# current optimized ESP32-C3 build. Keep explicit headroom for HAL/NVS/BLE
+# callees; hardware acceptance records the actual high-water mark before this
+# budget is changed again.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=65536
 CONFIG_FREERTOS_HZ=1000
 CONFIG_LOG_DEFAULT_LEVEL_INFO=y
 CONFIG_BT_ENABLED=y

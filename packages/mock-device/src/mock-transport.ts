@@ -2,6 +2,7 @@ import {
   DeviceTransportError,
   type DeviceCandidate,
   type DeviceTransport,
+  type DeviceTransportAvailability,
   type DeviceTransportDisconnect,
   type DeviceTransportOperation,
 } from '@focus-timer/device-client';
@@ -28,6 +29,7 @@ export class MockDeviceTransport implements DeviceTransport {
   private connected = false;
   private connectionNumber = 0;
   private requestNumber = 0;
+  private readonly availabilityListeners = new Set<(state: DeviceTransportAvailability) => void>();
   private readonly disconnectListeners = new Set<(event: DeviceTransportDisconnect) => void>();
 
   constructor(
@@ -100,6 +102,14 @@ export class MockDeviceTransport implements DeviceTransport {
     this.disconnectListeners.add(listener);
     return () => {
       this.disconnectListeners.delete(listener);
+    };
+  }
+
+  subscribeToAvailability(listener: (state: DeviceTransportAvailability) => void) {
+    this.availabilityListeners.add(listener);
+    listener(this.scenario.availability);
+    return () => {
+      this.availabilityListeners.delete(listener);
     };
   }
 

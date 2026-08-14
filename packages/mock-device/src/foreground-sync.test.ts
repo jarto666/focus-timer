@@ -12,7 +12,7 @@ import {
   type SessionRepository,
   type StoredSessionRecord,
 } from '@focus-timer/device-client';
-import { decodeRequest } from '@focus-timer/device-protocol';
+import { ProtocolErrorCode, decodeRequest, encodeResponse } from '@focus-timer/device-protocol';
 
 import { DeterministicMockDevice } from './mock-device';
 import { createMockTransport } from './mock-transport';
@@ -91,6 +91,71 @@ class MemorySessionRepository implements SessionRepository {
 }
 
 describe('foreground synchronization against the deterministic protocol mock', () => {
+  it('captures wall time after the BLE handshake instead of before connection setup', async () => {
+    const scenario = getMockScenario('empty');
+    const device = new DeterministicMockDevice(scenario);
+    const responder = createProtocolResponder(device);
+    const requests: string[] = [];
+    const transport = createMockTransport(scenario, (payload, context) => {
+      requests.push(decodeRequest(payload).request.type);
+      return responder(payload, context);
+    });
+    let clockReads = 0;
+
+    await synchronizeForeground(
+      transport,
+      scenario.candidate,
+      new MemorySessionRepository(),
+      () => {
+        clockReads += 1;
+        expect(requests).toEqual(['hello']);
+        return nowUtcMs;
+      },
+      operation,
+    );
+
+    expect(clockReads).toBe(1);
+    expect(requests.slice(0, 3)).toEqual(['hello', 'setClockAnchor', 'getStatus']);
+  });
+
+  it('continues read-only journal sync when firmware rejects a backwards clock refresh', async () => {
+    const scenario = getMockScenario('paged');
+    const device = new DeterministicMockDevice(scenario);
+    const responder = createProtocolResponder(device);
+    const requests: string[] = [];
+    const transport = createMockTransport(scenario, (payload, context) => {
+      const request = decodeRequest(payload);
+      requests.push(request.request.type);
+      if (request.request.type === 'setClockAnchor') {
+        return encodeResponse({
+          version: request.version,
+          requestId: request.requestId,
+          response: {
+            type: 'error',
+            error: {
+              code: ProtocolErrorCode.InvalidField,
+              failedMessageKind: 7,
+              fieldId: 0,
+            },
+          },
+        });
+      }
+      return responder(payload, context);
+    });
+
+    const result = await synchronizeForeground(
+      transport,
+      scenario.candidate,
+      new MemorySessionRepository(),
+      () => nowUtcMs,
+      operation,
+    );
+
+    expect(result.recordsReceived).toBeGreaterThan(0);
+    expect(requests.slice(0, 3)).toEqual(['hello', 'setClockAnchor', 'getStatus']);
+    expect(requests).toContain('getSessionPage');
+  });
+
   it('handles empty history and recognizes an already-current cursor', async () => {
     const scenario = getMockScenario('empty');
     const repository = new MemorySessionRepository();
@@ -100,14 +165,14 @@ describe('foreground synchronization against the deterministic protocol mock', (
       transport,
       scenario.candidate,
       repository,
-      nowUtcMs,
+      () => nowUtcMs,
       operation,
     );
     const second = await synchronizeForeground(
       transport,
       scenario.candidate,
       repository,
-      nowUtcMs,
+      () => nowUtcMs,
       operation,
     );
 
@@ -125,7 +190,7 @@ describe('foreground synchronization against the deterministic protocol mock', (
       transport,
       scenario.candidate,
       repository,
-      nowUtcMs,
+      () => nowUtcMs,
       operation,
     );
     await transport.disconnect();
@@ -146,7 +211,7 @@ describe('foreground synchronization against the deterministic protocol mock', (
       transport,
       scenario.candidate,
       repository,
-      nowUtcMs,
+      () => nowUtcMs,
       operation,
     );
     const cursorBefore = await repository.loadActiveCursor(result.deviceId);
@@ -178,7 +243,7 @@ describe('foreground synchronization against the deterministic protocol mock', (
       transport,
       scenario.candidate,
       repository,
-      nowUtcMs,
+      () => nowUtcMs,
       operation,
     );
     expect(retry.recordsReceived).toBe(0);
@@ -205,7 +270,7 @@ describe('foreground synchronization against the deterministic protocol mock', (
     const repository = new MemorySessionRepository();
 
     await expect(
-      synchronizeForeground(transport, scenario.candidate, repository, nowUtcMs, operation),
+      synchronizeForeground(transport, scenario.candidate, repository, () => nowUtcMs, operation),
     ).rejects.toMatchObject({ code: 'connection-lost' });
     const partialDeviceId = repository.firstRememberedDeviceId()!;
     expect((await repository.loadActiveCursor(partialDeviceId))?.afterSequence).toBe(2);
@@ -214,7 +279,7 @@ describe('foreground synchronization against the deterministic protocol mock', (
       transport,
       scenario.candidate,
       repository,
-      nowUtcMs,
+      () => nowUtcMs,
       operation,
     );
     expect(retry.recordsReceived).toBe(3);
@@ -228,7 +293,7 @@ describe('foreground synchronization against the deterministic protocol mock', (
     const transport = createProtocolMockTransport(scenario);
 
     await expect(
-      synchronizeForeground(transport, scenario.candidate, repository, nowUtcMs, operation),
+      synchronizeForeground(transport, scenario.candidate, repository, () => nowUtcMs, operation),
     ).rejects.toThrow('Injected atomic commit failure');
     const deviceId = repository.firstRememberedDeviceId()!;
     expect((await repository.loadActiveCursor(deviceId))?.afterSequence).toBe(2);
@@ -238,7 +303,7 @@ describe('foreground synchronization against the deterministic protocol mock', (
       transport,
       scenario.candidate,
       repository,
-      nowUtcMs,
+      () => nowUtcMs,
       operation,
     );
     expect(retry.recordsReceived).toBe(3);
@@ -255,7 +320,7 @@ describe('foreground synchronization against the deterministic protocol mock', (
       createProtocolMockTransport('empty'),
       getMockScenario('empty').candidate,
       repository,
-      nowUtcMs,
+      () => nowUtcMs,
       operation,
     );
     repository.seedCursor(probe.deviceId, {
@@ -270,7 +335,7 @@ describe('foreground synchronization against the deterministic protocol mock', (
       createProtocolMockTransport(scenario),
       scenario.candidate,
       repository,
-      nowUtcMs,
+      () => nowUtcMs,
       operation,
     );
     expect(result.cursor?.completeness).toBe(completeness);
@@ -286,7 +351,7 @@ describe('foreground synchronization against the deterministic protocol mock', (
         createProtocolMockTransport(scenario),
         scenario.candidate,
         new MemorySessionRepository(),
-        nowUtcMs,
+        () => nowUtcMs,
         operation,
       ),
     ).rejects.toBeInstanceOf(DeviceClientError);

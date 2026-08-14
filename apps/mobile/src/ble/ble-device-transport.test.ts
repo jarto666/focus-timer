@@ -8,6 +8,7 @@ import type {
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DeviceTransportError } from '@focus-timer/device-client';
+import type { DeviceTransportAvailability } from '@focus-timer/device-client';
 import { BleFragmenter, BleReassembler, parseBleFrame } from '@focus-timer/device-protocol';
 
 import { base64ToBytes, bytesToBase64 } from './base64';
@@ -133,13 +134,21 @@ class FakeManager {
   scanStopped = false;
   stateValue = 'PoweredOn';
   disconnectListener: ((error: BleError | null, device: Device | null) => void) | null = null;
+  stateListener: ((state: string) => void) | null = null;
 
   async state(): Promise<string> {
     return this.stateValue;
   }
 
-  onStateChange(): Subscription {
+  onStateChange(listener: (state: string) => void, emitCurrentState: boolean): Subscription {
+    this.stateListener = listener;
+    if (emitCurrentState) listener(this.stateValue);
     return new FakeSubscription();
+  }
+
+  emitState(state: string): void {
+    this.stateValue = state;
+    this.stateListener?.(state);
   }
 
   async startDeviceScan(
@@ -210,6 +219,21 @@ describe('BLE device transport', () => {
     });
   });
 
+  it('streams Bluetooth adapter state changes for runtime UI updates', () => {
+    const events: DeviceTransportAvailability[] = [];
+    const unsubscribe = transport.subscribeToAvailability((state) => events.push(state));
+
+    manager.emitState('PoweredOff');
+    manager.emitState('Unauthorized');
+    unsubscribe();
+
+    expect(events).toEqual([
+      { status: 'available' },
+      { status: 'unavailable', reason: 'powered-off' },
+      { status: 'permission-denied', canOpenSettings: true },
+    ]);
+  });
+
   it('pre-subscribes, fragments both directions, and correlates the transfer id', async () => {
     await transport.connect(candidate, operation);
     const request = Uint8Array.from({ length: 70 }, (_, index) => index);
@@ -245,6 +269,18 @@ describe('BLE device transport', () => {
     await expect(transport.request(Uint8Array.of(2), operation)).resolves.toEqual(
       manager.device.response,
     );
+  });
+
+  it('exposes bounded physical-acceptance hooks for corrupt ingress and mid-response loss', async () => {
+    await transport.connect(candidate, operation);
+    await expect(transport.writeCorruptFrameForAcceptance(operation)).resolves.toBe(
+      'gatt-rejected',
+    );
+
+    await expect(
+      transport.disconnectDuringResponseForAcceptance(Uint8Array.of(1, 2, 3), operation),
+    ).resolves.toBeUndefined();
+    expect(manager.device.connected).toBe(false);
   });
 
   it('notifies link loss and rejects the active request', async () => {

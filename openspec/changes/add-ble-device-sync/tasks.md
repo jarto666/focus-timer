@@ -44,16 +44,16 @@
 - [x] 5.4 Queue committed core outcomes to the journal only after state transition, attach optional clock-derived timestamps, retry at most one failed pending append with bounded backoff, and expose degradation without blocking the event loop.
 - [x] 5.5 Add host adapter tests for first boot, append/reboot, power-loss commit boundaries, corrupt slot, corrupt metadata, lost identity, new epoch, failed append, retry, eviction, and selected-preset namespace isolation.
 - [x] 5.6 Add focused journal clear/corrupt/fill diagnostics that cannot alter the production timer contract and document safe commands and expected recovery logs.
-- [ ] 5.7 Validate on hardware that completion and running/paused cancellation append exactly once, records survive reboot, eviction reports a gap, clock-known and clock-unknown records differ correctly, and injected journal failure leaves the timer usable.
+- [x] 5.7 Validate on hardware that completion and running/paused cancellation append exactly once, records survive reboot, eviction reports a gap, clock-known and clock-unknown records differ correctly, and injected journal failure leaves the timer usable.
 
 ## 6. Bring Up the ESP32-C3 BLE Service
 
 - [x] 6.1 Spike the maintained Rust surfaces over the pinned ESP-IDF NimBLE stack, prove a clean compile, and pin the smallest option that supports the required server callbacks or document the narrow `esp-idf-sys` fallback.
-- [ ] 6.2 Advertise the custom Focus Timer service and prove physical iPhone discovery, connect, service discovery, command write, response notification, disconnect, and restart advertising with a bounded echo/handshake diagnostic.
+- [x] 6.2 Advertise the custom Focus Timer service and prove physical iPhone discovery, connect, service discovery, command write, response notification, disconnect, and restart advertising with a bounded echo/handshake diagnostic.
 - [x] 6.3 Implement the production BLE adapter, command/response characteristics, handshake gate, structured connection lifecycle, request timeouts, and diagnostic reporting without granting callbacks access to `App` or GPIO.
 - [x] 6.4 Connect protocol requests to the immutable status cache, volatile clock anchor, and stateless journal-page reader through bounded mailboxes or copied snapshots.
 - [x] 6.5 Integrate Rust fragmentation/reassembly at the GATT boundary and verify multi-fragment responses at default and negotiated payload sizes plus recovery after invalid transfers.
-- [ ] 6.6 Verify radio initialization failure, incompatible handshake, unknown command, malformed payload, disconnect, and notification failure cannot affect physical input, monotonic timing, OLED, buzzer, settings, or journal integrity.
+- [x] 6.6 Verify radio initialization failure, incompatible handshake, unknown command, malformed payload, disconnect, and notification failure cannot affect physical input, monotonic timing, OLED, buzzer, settings, or journal integrity.
 
 ## 7. Implement Local Mobile Persistence and Synchronization
 
@@ -71,7 +71,7 @@
 - [x] 8.3 Implement the mobile BLE request path with pre-subscribed notifications, bounded fragmentation/reassembly, one in-flight request, explicit timeouts, cancellation, and recovery after malformed or partial responses.
 - [x] 8.4 Integrate foreground/resume orchestration: reconnect or offer retry, handshake, send the volatile clock anchor, read status, synchronize to current, and preserve local history when the device is unavailable.
 - [x] 8.5 Prove the same application build can switch between mock and BLE transports without screen branches or divergent logical models.
-- [ ] 8.6 Run a physical end-to-end session: operate the timer without the app, reconnect the iPhone, synchronize the new outcome into SQLite, disconnect, and verify the history remains available offline.
+- [x] 8.6 Run a physical end-to-end session: operate the timer without the app, reconnect the iPhone, synchronize the new outcome into SQLite, disconnect, and verify the history remains available offline.
 
 ## 9. Reliability, Resource, and Handoff Acceptance
 

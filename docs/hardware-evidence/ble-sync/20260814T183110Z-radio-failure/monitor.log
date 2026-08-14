@@ -1,0 +1,170 @@
+ESP-ROM:esp32c3-api1-20210207
+Build:Feb  7 2021
+rst:0x15 (USB_UART_CHIP_RESET),boot:0xc (SPI_FAST_FLASH_BOOT)
+Saved PC:0x4038879e
+SPIWP:0xee
+mode:DIO, clock div:2
+load:0x3fcd5820,len:0x15c4
+load:0x403cbf10,len:0xc84
+load:0x403ce710,len:0x2fd0
+entry 0x403cbf1a
+I (24) boot: ESP-IDF v5.5.1-838-gd66ebb86d2e 2nd stage bootloader
+I (25) boot: compile time Nov 26 2025 12:25:17
+I (25) boot: chip revision: v0.4
+I (26) boot: efuse block revision: v1.3
+I (30) boot.esp32c3: SPI Speed      : 40MHz
+I (34) boot.esp32c3: SPI Mode       : DIO
+I (37) boot.esp32c3: SPI Flash Size : 4MB
+I (41) boot: Enabling RNG early entropy source...
+I (46) boot: Partition Table:
+I (48) boot: ## Label            Usage          Type ST Offset   Length
+I (54) boot:  0 nvs              WiFi data        01 02 00009000 00006000
+I (61) boot:  1 phy_init         RF data          01 01 0000f000 00001000
+I (67) boot:  2 factory          factory app      00 00 00010000 003f0000
+I (74) boot: End of partition table
+I (77) esp_image: segment 0: paddr=00010020 vaddr=3c0b0020 size=41934h (268596) map
+I (143) esp_image: segment 1: paddr=0005195c vaddr=3fc92c00 size=02ae0h ( 10976) load
+I (147) esp_image: segment 2: paddr=00054444 vaddr=40380000 size=0bbd4h ( 48084) load
+I (159) esp_image: segment 3: paddr=00060020 vaddr=42000020 size=aa108h (696584) map
+I (312) esp_image: segment 4: paddr=0010a130 vaddr=4038bbd4 size=06f94h ( 28564) load
+I (319) esp_image: segment 5: paddr=001110cc vaddr=50000000 size=00020h (    32) load
+I (325) boot: Loaded app from partition at offset 0x10000
+I (325) boot: Disabling RNG early entropy source...
+I (337) cpu_start: Unicore app
+I (345) cpu_start: Pro cpu start user code
+I (345) cpu_start: cpu freq: 160000000 Hz
+I (345) app_init: Application information:
+I (346) app_init: Project name:     libespidf
+I (346) app_init: App version:      0c7ebc1-dirty
+I (346) app_init: Compile time:     Aug 14 2026 14:55:37
+I (346) app_init: ELF file SHA256:  0635c6677...
+I (346) app_init: ESP-IDF:          v5.5.3
+I (346) efuse_init: Min chip rev:     v0.3
+I (346) efuse_init: Max chip rev:     v1.99 
+I (346) efuse_init: Chip rev:         v0.4
+I (347) heap_init: Initializing. RAM available for dynamic allocation:
+I (347) heap_init: At 3FC96D80 len 00029280 (164 KiB): RAM
+I (347) heap_init: At 3FCC0000 len 0001C710 (113 KiB): Retention RAM
+I (347) heap_init: At 3FCDC710 len 00002950 (10 KiB): Retention RAM
+I (347) heap_init: At 50000020 len 00001FC8 (7 KiB): RTCRAM
+I (349) spi_flash: detected chip: generic
+I (349) spi_flash: flash io: dio
+W (349) i2c: This driver is an old driver, please migrate your application code to adapt `driver/i2c_master.h`
+I (350) sleep_gpio: Configure to isolate all GPIO pins in sleep state
+I (350) sleep_gpio: Enable automatic switching of GPIO sleep configuration
+I (352) main_task: Started on CPU0
+I (352) main_task: Calling app_main()
+I (354) focus_firmware: focus-firmware 0.1.0 booting on ESP32-C3; reset_reason=USBPeripheral
+I (355) focus_firmware::runtime: runtime stage: peripherals acquired
+I (356) focus_firmware::runtime: runtime stage: encoder and buzzer GPIO configured
+I (358) focus_firmware::runtime: runtime stage: probing OLED at 0x3C
+I (367) focus_firmware::runtime: runtime stage: OLED initialized
+I (368) focus_firmware::runtime: runtime stage: opening persistent stores
+I (450) focus_firmware::runtime: session journal ready: device=[8f, 32, 6f, 0b, 85, bd, c7, 02, 54, 5b, 53, ce, 6f, 26, 6d, 13] epoch=[00, 6e, c3, bb, 47, 70, 8d, 74] bounds=(Some(138), Some(201)) health=Degraded init=InitReport { identity: Existing, epoch: Existing, metadata: Clean, invalid_slot_count: 1 }
+I (454) focus_firmware::runtime: settings record loaded from NVS
+E (455) focus_firmware::runtime: RADIO FAILURE DIAGNOSTIC: injected BLE initialization failure; continuing as a complete offline timer
+I (456) focus_firmware::runtime: integrated runtime ready: OLED=0x3C GPIO6/GPIO7; EC11 S1=GPIO0 S2=GPIO4 KEY=GPIO5; active buzzer=GPIO1 through 330 ohm; boot levels S1=true S2=true KEY=true
+W (456) focus_firmware::runtime: RADIO FAILURE DIAGNOSTIC: BLE is intentionally absent and all five presets are temporarily shortened to 8 seconds
+I (574) focus_firmware::runtime: OLED render: state=READY preset=Focus time=00:08
+I (2741339) focus_firmware::runtime: input event: Press
+I (2741340) focus_firmware::runtime: buzzer feedback started: Start
+I (2741457) focus_firmware::runtime: OLED render: state=FOCUS preset=Focus time=00:08
+I (2742457) focus_firmware::runtime: OLED render: state=FOCUS preset=Focus time=00:07
+I (2743457) focus_firmware::runtime: OLED render: state=FOCUS preset=Focus time=00:06
+I (2744457) focus_firmware::runtime: OLED render: state=FOCUS preset=Focus time=00:05
+I (2744900) focus_firmware::runtime: input event: Press
+I (2745018) focus_firmware::runtime: OLED render: state=PAUSED preset=Focus time=00:05
+I (2750881) focus_firmware::runtime: input event: Press
+I (2750999) focus_firmware::runtime: OLED render: state=FOCUS preset=Focus time=00:05
+I (2751438) focus_firmware::runtime: OLED render: state=FOCUS preset=Focus time=00:04
+I (2752438) focus_firmware::runtime: OLED render: state=FOCUS preset=Focus time=00:03
+I (2752633) focus_firmware::runtime: committed session outcome queued for journal append
+I (2752634) focus_firmware::runtime: input event: LongPress
+I (2752640) focus_firmware::runtime: session journal append committed: sequence=202
+I (2752758) focus_firmware::runtime: OLED render: state=READY preset=Focus time=00:08
+I (2759145) focus_firmware::runtime: input event: Press
+I (2759146) focus_firmware::runtime: buzzer feedback started: Start
+I (2759263) focus_firmware::runtime: OLED render: state=FOCUS preset=Focus time=00:08
+I (2760263) focus_firmware::runtime: OLED render: state=FOCUS preset=Focus time=00:07
+I (2761263) focus_firmware::runtime: OLED render: state=FOCUS preset=Focus time=00:06
+I (2761824) focus_firmware::runtime: input event: RotateLeft
+I (2761848) focus_firmware::runtime: input event: RotateLeft
+I (2761874) focus_firmware::runtime: input event: RotateLeft
+I (2761950) focus_firmware::runtime: input event: RotateLeft
+I (2762068) focus_firmware::runtime: input event: RotateRight
+I (2762088) focus_firmware::runtime: input event: RotateRight
+I (2762106) focus_firmware::runtime: input event: RotateRight
+I (2762124) focus_firmware::runtime: input event: RotateRight
+I (2762263) focus_firmware::runtime: OLED render: state=FOCUS preset=Focus time=00:05
+I (2762328) focus_firmware::runtime: input event: RotateLeft
+I (2762346) focus_firmware::runtime: input event: RotateLeft
+I (2762364) focus_firmware::runtime: input event: RotateLeft
+I (2762384) focus_firmware::runtime: input event: RotateLeft
+I (2762420) focus_firmware::runtime: input event: RotateLeft
+I (2762548) focus_firmware::runtime: input event: RotateRight
+I (2762572) focus_firmware::runtime: input event: RotateRight
+I (2762594) focus_firmware::runtime: input event: RotateRight
+I (2762616) focus_firmware::runtime: input event: RotateRight
+I (2762650) focus_firmware::runtime: input event: RotateRight
+I (2762754) focus_firmware::runtime: input event: RotateLeft
+I (2762778) focus_firmware::runtime: input event: RotateLeft
+I (2762806) focus_firmware::runtime: input event: RotateLeft
+I (2762822) focus_firmware::runtime: input event: RotateLeft
+I (2762850) focus_firmware::runtime: input event: RotateLeft
+I (2762958) focus_firmware::runtime: input event: RotateRight
+I (2762982) focus_firmware::runtime: input event: RotateRight
+I (2763004) focus_firmware::runtime: input event: RotateRight
+I (2763028) focus_firmware::runtime: input event: RotateRight
+I (2763052) focus_firmware::runtime: input event: RotateRight
+I (2763088) focus_firmware::runtime: input event: RotateRight
+I (2763263) focus_firmware::runtime: OLED render: state=FOCUS preset=Focus time=00:04
+I (2763294) focus_firmware::runtime: input event: RotateLeft
+I (2763464) focus_firmware::runtime: input event: RotateRight
+I (2763484) focus_firmware::runtime: input event: RotateRight
+I (2763502) focus_firmware::runtime: input event: RotateRight
+I (2763892) focus_firmware::runtime: input event: RotateLeft
+I (2764263) focus_firmware::runtime: OLED render: state=FOCUS preset=Focus time=00:03
+I (2764560) focus_firmware::runtime: input event: RotateRight
+I (2764918) focus_firmware::runtime: input event: RotateRight
+I (2765263) focus_firmware::runtime: OLED render: state=FOCUS preset=Focus time=00:02
+I (2765460) focus_firmware::runtime: input event: RotateLeft
+I (2765476) focus_firmware::runtime: input event: RotateLeft
+I (2765488) focus_firmware::runtime: input event: RotateLeft
+I (2765510) focus_firmware::runtime: input event: RotateLeft
+I (2765528) focus_firmware::runtime: input event: RotateLeft
+I (2765560) focus_firmware::runtime: input event: RotateLeft
+I (2765644) focus_firmware::runtime: input event: RotateRight
+I (2765658) focus_firmware::runtime: input event: RotateRight
+I (2765672) focus_firmware::runtime: input event: RotateRight
+I (2765688) focus_firmware::runtime: input event: RotateRight
+I (2765708) focus_firmware::runtime: input event: RotateRight
+I (2765732) focus_firmware::runtime: input event: RotateRight
+I (2765776) focus_firmware::runtime: input event: RotateRight
+I (2765842) focus_firmware::runtime: input event: RotateLeft
+I (2765858) focus_firmware::runtime: input event: RotateLeft
+I (2765872) focus_firmware::runtime: input event: RotateLeft
+I (2765890) focus_firmware::runtime: input event: RotateLeft
+I (2765940) focus_firmware::runtime: input event: RotateLeft
+I (2766004) focus_firmware::runtime: input event: RotateRight
+I (2766026) focus_firmware::runtime: input event: RotateRight
+I (2766054) focus_firmware::runtime: input event: RotateRight
+I (2766094) focus_firmware::runtime: input event: RotateRight
+I (2766263) focus_firmware::runtime: OLED render: state=FOCUS preset=Focus time=00:01
+I (2766338) focus_firmware::runtime: input event: RotateRight
+I (2766360) focus_firmware::runtime: input event: RotateRight
+I (2766386) focus_firmware::runtime: input event: RotateRight
+I (2766420) focus_firmware::runtime: input event: RotateRight
+I (2766526) focus_firmware::runtime: input event: RotateLeft
+I (2766544) focus_firmware::runtime: input event: RotateLeft
+I (2766564) focus_firmware::runtime: input event: RotateLeft
+I (2766596) focus_firmware::runtime: input event: RotateLeft
+I (2766698) focus_firmware::runtime: input event: RotateRight
+I (2766716) focus_firmware::runtime: input event: RotateRight
+I (2766740) focus_firmware::runtime: input event: RotateRight
+I (2766776) focus_firmware::runtime: input event: RotateRight
+I (2767146) focus_firmware::runtime: committed session outcome queued for journal append
+I (2767147) focus_firmware::runtime: buzzer feedback started: Complete
+I (2767153) focus_firmware::runtime: session journal append committed: sequence=203
+I (2767271) focus_firmware::runtime: OLED render: state=COMPLETE preset=Focus time=00:00
+I (2770946) focus_firmware::runtime: input event: Press
+I (2771064) focus_firmware::runtime: OLED render: state=READY preset=Focus time=00:08

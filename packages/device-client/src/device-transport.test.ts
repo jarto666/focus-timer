@@ -27,6 +27,7 @@ const availabilityStates = [
 class EchoTransport implements DeviceTransport {
   readonly kind = 'test-echo';
   private connected = false;
+  private readonly availabilityListeners = new Set<(state: DeviceTransportAvailability) => void>();
   private readonly disconnectListeners = new Set<(event: DeviceTransportDisconnect) => void>();
 
   async readAvailability() {
@@ -60,6 +61,16 @@ class EchoTransport implements DeviceTransport {
   subscribeToDisconnect(listener: (event: DeviceTransportDisconnect) => void) {
     this.disconnectListeners.add(listener);
     return () => this.disconnectListeners.delete(listener);
+  }
+
+  subscribeToAvailability(listener: (state: DeviceTransportAvailability) => void) {
+    this.availabilityListeners.add(listener);
+    listener({ status: 'available' });
+    return () => this.availabilityListeners.delete(listener);
+  }
+
+  changeAvailability(state: DeviceTransportAvailability) {
+    for (const listener of this.availabilityListeners) listener(state);
   }
 
   loseLink() {
@@ -114,5 +125,20 @@ describe('DeviceTransport contract', () => {
     transport.loseLink();
 
     expect(events).toEqual([{ reason: 'link-loss', message: null }]);
+  });
+
+  it('delivers adapter availability changes and supports listener cleanup', () => {
+    const transport = new EchoTransport();
+    const events: DeviceTransportAvailability[] = [];
+    const unsubscribe = transport.subscribeToAvailability((state) => events.push(state));
+
+    transport.changeAvailability({ status: 'unavailable', reason: 'powered-off' });
+    unsubscribe();
+    transport.changeAvailability({ status: 'available' });
+
+    expect(events).toEqual([
+      { status: 'available' },
+      { status: 'unavailable', reason: 'powered-off' },
+    ]);
   });
 });

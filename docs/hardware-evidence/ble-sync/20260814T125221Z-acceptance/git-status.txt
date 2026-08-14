@@ -1,0 +1,11 @@
+ M .gitignore
+ M device/Cargo.lock
+ M device/crates/focus-firmware/Cargo.toml
+ M device/crates/focus-firmware/sdkconfig.defaults
+ M device/crates/focus-firmware/src/runtime.rs
+ M docs/ble-development.md
+ M docs/ble-sync-acceptance.md
+ M openspec/changes/add-ble-device-sync/tasks.md
+ M scripts/README.md
+?? docs/hardware-evidence/ble-sync/
+?? scripts/ble-acceptance.sh

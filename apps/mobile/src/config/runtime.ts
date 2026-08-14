@@ -1,10 +1,12 @@
 import { mockScenarioIds, type MockScenarioId } from '@focus-timer/mock-device';
 
 export type DeviceBackend = 'mock' | 'ble';
+export type BleAcceptanceDiagnostic = 'off' | 'fault-matrix';
 
 export type RuntimeConfig = Readonly<{
   deviceBackend: DeviceBackend;
   mockScenario: MockScenarioId;
+  bleAcceptanceDiagnostic: BleAcceptanceDiagnostic;
 }>;
 
 export function resolveDeviceBackend(value: string | undefined): DeviceBackend {
@@ -36,7 +38,16 @@ export function resolveMockScenario(value: string | undefined): MockScenarioId {
   );
 }
 
+export function resolveBleAcceptanceDiagnostic(value: string | undefined): BleAcceptanceDiagnostic {
+  if (value === undefined || value === '' || value === 'off') return 'off';
+  if (value === 'fault-matrix') return value;
+  throw new Error(
+    `Unsupported EXPO_PUBLIC_BLE_ACCEPTANCE=${JSON.stringify(value)}; expected "off" or "fault-matrix"`,
+  );
+}
+
 export const runtimeConfig: RuntimeConfig = {
   deviceBackend: resolveDeviceBackend(process.env.EXPO_PUBLIC_DEVICE_BACKEND),
   mockScenario: resolveMockScenario(process.env.EXPO_PUBLIC_MOCK_SCENARIO),
+  bleAcceptanceDiagnostic: resolveBleAcceptanceDiagnostic(process.env.EXPO_PUBLIC_BLE_ACCEPTANCE),
 };

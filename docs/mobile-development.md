@@ -136,12 +136,18 @@ port 8081 so the development client does not attach to the wrong backend.
    and response characteristics, and subscribes before the first write.
 3. The protocol handshake supplies the stable product identity. The iOS
    peripheral identifier is retained only as a reconnect hint.
-4. The app sends a volatile clock anchor, reads immutable timer status, and
-   fetches journal pages until current.
-5. Each page and cursor commit in one SQLite transaction. A disconnect or app
+4. A foreground cold launch attempts the remembered peripheral once. Failure
+   falls back to the explicit reconnect/search UI without a retry loop.
+5. The app sends a volatile clock anchor, reads immutable timer status, and
+   fetches journal pages until current. It samples wall time after connection
+   and Hello, immediately before `SetClockAnchor`; sampling before BLE setup can
+   make a reconnect anchor stale enough for the firmware to reject it as time
+   moving backwards.
+6. Each page and cursor commit in one SQLite transaction. A disconnect or app
    termination retries from the last committed cursor.
-6. The app keeps local history readable while Bluetooth and the timer are
-   unavailable. A later foreground launch offers explicit reconnection.
+7. The app keeps local history readable while Bluetooth and the timer are
+   unavailable. A later foreground launch attempts the remembered link once
+   and still offers explicit reconnection if that attempt fails.
 
 The BLE transport permits one request at a time, correlates both BLE transfer
 and logical request identifiers, applies explicit timeouts/cancellation, and

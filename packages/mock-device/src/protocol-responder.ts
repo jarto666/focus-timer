@@ -38,6 +38,16 @@ export function createProtocolResponder(device: DeterministicMockDevice): MockRe
 }
 
 function respond(device: DeterministicMockDevice, envelope: RequestEnvelope): Response {
+  if (envelope.version.major !== protocolVersion.major) {
+    return {
+      type: 'error',
+      error: {
+        code: ProtocolErrorCode.UnsupportedProtocolVersion,
+        supportedVersion: protocolVersion,
+      },
+    };
+  }
+
   if (envelope.request.type === 'hello') {
     const handshake = device.handshake();
     if (handshake.kind === 'incompatible') {
@@ -61,16 +71,6 @@ function respond(device: DeterministicMockDevice, envelope: RequestEnvelope): Re
           Capability.ReadSessionPages,
           Capability.SetClockAnchor,
         ],
-      },
-    };
-  }
-
-  if (envelope.version.major !== protocolVersion.major) {
-    return {
-      type: 'error',
-      error: {
-        code: ProtocolErrorCode.UnsupportedProtocolVersion,
-        supportedVersion: protocolVersion,
       },
     };
   }

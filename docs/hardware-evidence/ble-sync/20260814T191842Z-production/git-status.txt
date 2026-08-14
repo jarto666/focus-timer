@@ -1,0 +1,29 @@
+ M .gitignore
+ M apps/mobile/src/application/runtime-provider.tsx
+ M apps/mobile/src/ble/ble-device-transport.test.ts
+ M apps/mobile/src/ble/ble-device-transport.ts
+ M apps/mobile/src/config/runtime.test.ts
+ M apps/mobile/src/config/runtime.ts
+ M device/Cargo.lock
+ M device/Cargo.toml
+ M device/crates/focus-firmware/Cargo.toml
+ M device/crates/focus-firmware/sdkconfig.defaults
+ M device/crates/focus-firmware/src/ble_radio.rs
+ M device/crates/focus-firmware/src/runtime.rs
+ M device/crates/focus-sync/src/journal.rs
+ M device/crates/focus-sync/src/persistence.rs
+ M docs/ble-development.md
+ M docs/ble-sync-acceptance.md
+ M docs/mobile-development.md
+ M openspec/changes/add-ble-device-sync/tasks.md
+ M packages/device-client/src/foreground-sync.ts
+ M packages/device-client/src/index.ts
+ M packages/mock-device/src/foreground-sync.test.ts
+ M packages/mock-device/src/protocol-responder.ts
+ M scripts/README.md
+ M scripts/check-device.sh
+?? device/crates/focus-esp-resources/
+?? docs/hardware-evidence/ble-sync/
+?? packages/device-client/src/physical-acceptance.ts
+?? packages/mock-device/src/physical-acceptance.test.ts
+?? scripts/ble-acceptance.sh

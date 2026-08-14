@@ -7,6 +7,10 @@ export {
   type ForegroundSyncResult,
 } from './foreground-sync';
 export {
+  runProtocolFaultAcceptance,
+  type ProtocolFaultAcceptanceResult,
+} from './physical-acceptance';
+export {
   bytesToHex,
   hexToBytes,
   nextCursorAfterSequence,

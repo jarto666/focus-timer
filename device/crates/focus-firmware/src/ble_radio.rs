@@ -1,3 +1,5 @@
+#![cfg_attr(feature = "radio-failure-diagnostic", allow(dead_code))]
+
 use std::{boxed::Box, sync::Arc, time::Instant};
 
 use esp32_nimble::{
@@ -135,6 +137,9 @@ struct OutboundTransfer {
     connection_generation: u32,
     connection_handle: u16,
     fragments: OwnedFragmenter,
+    logical_bytes: usize,
+    frames_sent: usize,
+    started_at: Instant,
 }
 
 /// Narrow production adapter around `NimBLE`. Callbacks only touch `SharedState`;
@@ -363,6 +368,9 @@ impl BleRadio {
             connection_generation: state.generation,
             connection_handle: connection.handle,
             fragments,
+            logical_bytes: message.len(),
+            frames_sent: 0,
+            started_at: Instant::now(),
         }));
         state.outbound_busy = true;
         Ok(())
@@ -410,7 +418,14 @@ impl BleRadio {
             self.shared.lock().outbound_busy = false;
             return Err(NotificationError::Notify(error));
         }
+        outbound.frames_sent += 1;
         if outbound.fragments.is_complete() {
+            log::info!(
+                "BLE logical response transfer: bytes={} frames={} elapsed_ms={}",
+                outbound.logical_bytes,
+                outbound.frames_sent,
+                outbound.started_at.elapsed().as_millis()
+            );
             self.outbound = None;
             self.shared.lock().outbound_busy = false;
             Ok(NotificationProgress::Complete)
