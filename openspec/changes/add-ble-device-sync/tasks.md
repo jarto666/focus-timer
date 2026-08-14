@@ -22,7 +22,7 @@
 - [x] 3.1 Write the protocol schema registry with service/characteristic UUIDs, protocol version policy, numeric message/field identifiers, constrained-CBOR rules, string/page/message limits, error codes, and BLE frame format.
 - [x] 3.2 Add the `focus-protocol` Rust crate with bounded logical models and explicit canonical codecs for handshake, status, session pages, clock anchors, and structured errors.
 - [x] 3.3 Implement the matching TypeScript logical models and explicit canonical codecs in `packages/device-protocol` without generic object serialization.
-- [ ] 3.4 Implement bounded BLE fragmentation and reassembly codecs in Rust and TypeScript with transfer correlation, contiguous offsets, checksum validation, timeout reset, and one in-progress transfer limit.
+- [x] 3.4 Implement bounded BLE fragmentation and reassembly codecs in Rust and TypeScript with transfer correlation, contiguous offsets, checksum validation, timeout reset, and one in-progress transfer limit.
 - [ ] 3.5 Commit shared golden fixtures for every message kind and edge value, and gate both Rust and TypeScript encoders/decoders on byte-identical output and historical-fixture decoding.
 - [ ] 3.6 Add malformed, truncated, duplicate-key, out-of-order-fragment, checksum, unsupported-message, incompatible-version, and oversized-input tests proving bounded recovery with no panic.
 - [ ] 3.7 Add the protocol compatibility check to the root workflows and document the rule that committed identifiers and fixtures require an explicit version transition rather than in-place reinterpretation.
