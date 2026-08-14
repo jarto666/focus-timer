@@ -8,13 +8,16 @@ const DIAGNOSTIC_COUNT: usize = cfg!(feature = "ring-diagnostic") as usize
     + cfg!(feature = "settings-corrupt-diagnostic") as usize
     + cfg!(feature = "journal-clear-diagnostic") as usize
     + cfg!(feature = "journal-corrupt-diagnostic") as usize
-    + cfg!(feature = "journal-fill-diagnostic") as usize;
+    + cfg!(feature = "journal-fill-diagnostic") as usize
+    + cfg!(feature = "ble-echo-diagnostic") as usize;
 
 const _: () = assert!(
     DIAGNOSTIC_COUNT == 1,
     "select exactly one concrete diagnostic feature"
 );
 
+#[cfg(feature = "ble-echo-diagnostic")]
+mod ble_echo;
 #[cfg(feature = "buzzer-diagnostic")]
 mod buzzer;
 #[cfg(feature = "encoder-diagnostic")]
@@ -36,6 +39,9 @@ mod ring;
 mod settings;
 
 pub(super) fn run() {
+    #[cfg(feature = "ble-echo-diagnostic")]
+    ble_echo::run();
+
     #[cfg(feature = "ring-diagnostic")]
     ring::run();
 

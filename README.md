@@ -54,5 +54,7 @@ pnpm check:all
 See [docs/development.md](docs/development.md) for development and flash
 commands, [docs/hardware.md](docs/hardware.md) for prototype evidence,
 [docs/wiring.md](docs/wiring.md) to reproduce or transfer the circuit, and
-[docs/acceptance.md](docs/acceptance.md) for the offline-MVP capability audit.
+[docs/ble-development.md](docs/ble-development.md) for the bounded NimBLE
+adapter and diagnostic workflow, and [docs/acceptance.md](docs/acceptance.md)
+for the offline-MVP capability audit.
 The oversized external WS2812 ring remains disconnected and deferred.

@@ -10,6 +10,7 @@ publish = false
 default = ["esp-idf-runtime"]
 esp-idf-runtime = [
     "dep:embedded-graphics",
+    "dep:esp32-nimble",
     "dep:esp-idf-svc",
     "dep:getrandom",
     "dep:log",
@@ -29,6 +30,7 @@ settings-corrupt-diagnostic = ["diagnostic-firmware"]
 journal-clear-diagnostic = ["diagnostic-firmware"]
 journal-corrupt-diagnostic = ["diagnostic-firmware"]
 journal-fill-diagnostic = ["diagnostic-firmware"]
+ble-echo-diagnostic = ["diagnostic-firmware"]
 
 [lib]
 name = "focus_firmware"
@@ -43,9 +45,11 @@ required-features = ["esp-idf-runtime"]
 
 [dependencies]
 focus-core = { path = "../focus-core" }
+focus-protocol = { path = "../focus-protocol" }
 focus-sync = { path = "../focus-sync" }
 heapless = "=0.8.0"
 embedded-graphics = { version = "=0.8.2", optional = true }
+esp32-nimble = { version = "=0.12.0", optional = true }
 esp-idf-svc = { version = "=0.52.1", features = ["critical-section"], optional = true }
 getrandom = { version = "=0.3.4", optional = true }
 log = { version = "=0.4.29", optional = true }

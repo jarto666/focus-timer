@@ -664,6 +664,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "esp32-nimble"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aabfc9f595c551d3270ab2a5feca5f5b961863bcc40bb5549a8f9b4154fd8997"
+dependencies = [
+ "anyhow",
+ "bitflags 2.13.1",
+ "bstr",
+ "cfg-if",
+ "embassy-sync",
+ "embuild",
+ "esp-idf-svc",
+ "heapless 0.8.0",
+ "log",
+ "num_enum",
+ "once_cell",
+ "uuid",
+ "zerocopy",
+ "zerocopy-derive",
+]
+
+[[package]]
 name = "fastrand"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -711,7 +733,9 @@ dependencies = [
  "embedded-graphics",
  "embuild",
  "esp-idf-svc",
+ "esp32-nimble",
  "focus-core",
+ "focus-protocol",
  "focus-sync",
  "getrandom 0.3.4",
  "heapless 0.8.0",
@@ -1596,6 +1620,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
 
 [[package]]
+name = "uuid"
+version = "1.24.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bf3923a6f5c4c6382e0b653c4117f48d631ea17f38ed86e2a828e6f7412f5239"
+
+[[package]]
 name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1856,6 +1886,26 @@ name = "wit-bindgen"
 version = "0.46.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f17a85883d4e6d00e8a97c586de764dabcc06133f7f1d55dce5cdc070ad7fe59"
+
+[[package]]
+name = "zerocopy"
+version = "0.8.56"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "556764e583adb45a9f8d413c2a147fa7e8d821e48e12b14fd560b607998b75eb"
+dependencies = [
+ "zerocopy-derive",
+]
+
+[[package]]
+name = "zerocopy-derive"
+version = "0.8.56"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f2ab42fc20575779bd240faa45f94a74256f755c0fa9e89f0ede20d91d0cdfc1"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
 
 [[package]]
 name = "zmij"

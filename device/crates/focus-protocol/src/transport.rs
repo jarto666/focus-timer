@@ -114,36 +114,117 @@ impl<'a> Fragmenter<'a> {
     /// Returns [`FragmentError::OutputTooSmall`] when `output` cannot hold the
     /// next frame up to the negotiated characteristic value size.
     pub fn next_frame(&mut self, output: &mut [u8]) -> Result<Option<usize>, FragmentError> {
-        if self.is_complete() {
-            return Ok(None);
-        }
-        let payload_capacity = self.maximum_frame_bytes - BLE_FRAME_HEADER_BYTES;
-        let payload_length = payload_capacity.min(self.message.len() - self.offset);
-        let frame_length = BLE_FRAME_HEADER_BYTES + payload_length;
-        if output.len() < frame_length {
-            return Err(FragmentError::OutputTooSmall);
-        }
-
-        let end_offset = self.offset + payload_length;
-        let mut flags = 0;
-        if self.offset == 0 {
-            flags |= BLE_START_FLAG;
-        }
-        if end_offset == self.message.len() {
-            flags |= BLE_END_FLAG;
-        }
-        output[0] = BLE_FRAME_VERSION;
-        output[1] = flags;
-        output[2..4].copy_from_slice(&self.transfer_id.to_be_bytes());
-        output[4..6].copy_from_slice(&self.total_length.to_be_bytes());
-        let fragment_offset =
-            u16::try_from(self.offset).map_err(|_| FragmentError::MessageTooLarge)?;
-        output[6..8].copy_from_slice(&fragment_offset.to_be_bytes());
-        output[8..12].copy_from_slice(&self.checksum.to_be_bytes());
-        output[12..frame_length].copy_from_slice(&self.message[self.offset..end_offset]);
-        self.offset = end_offset;
-        Ok(Some(frame_length))
+        encode_next_frame(
+            self.message,
+            self.transfer_id,
+            self.maximum_frame_bytes,
+            self.total_length,
+            self.checksum,
+            &mut self.offset,
+            output,
+        )
     }
+}
+
+/// An owned bounded fragment stream suitable for a non-blocking firmware
+/// outbox that emits one notification per event-loop iteration.
+pub struct OwnedFragmenter {
+    message: [u8; MAX_LOGICAL_MESSAGE_BYTES],
+    message_length: usize,
+    transfer_id: u16,
+    maximum_frame_bytes: usize,
+    total_length: u16,
+    offset: usize,
+    checksum: u32,
+}
+
+impl OwnedFragmenter {
+    /// Copies one bounded logical response into an owned transfer.
+    ///
+    /// # Errors
+    ///
+    /// Applies the same transfer identifier, message, and frame-capacity
+    /// bounds as [`Fragmenter::new`].
+    pub fn new(
+        message: &[u8],
+        transfer_id: u16,
+        maximum_frame_bytes: usize,
+    ) -> Result<Self, FragmentError> {
+        let fragmenter = Fragmenter::new(message, transfer_id, maximum_frame_bytes)?;
+        let mut owned = Self {
+            message: [0; MAX_LOGICAL_MESSAGE_BYTES],
+            message_length: message.len(),
+            transfer_id,
+            maximum_frame_bytes,
+            total_length: fragmenter.total_length,
+            offset: 0,
+            checksum: fragmenter.checksum,
+        };
+        owned.message[..message.len()].copy_from_slice(message);
+        Ok(owned)
+    }
+
+    #[must_use]
+    pub const fn is_complete(&self) -> bool {
+        self.offset == self.message_length
+    }
+
+    /// Encodes the next contiguous frame while retaining owned transfer state.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FragmentError::OutputTooSmall`] when `output` cannot hold the
+    /// next frame up to the negotiated characteristic value size.
+    pub fn next_frame(&mut self, output: &mut [u8]) -> Result<Option<usize>, FragmentError> {
+        encode_next_frame(
+            &self.message[..self.message_length],
+            self.transfer_id,
+            self.maximum_frame_bytes,
+            self.total_length,
+            self.checksum,
+            &mut self.offset,
+            output,
+        )
+    }
+}
+
+fn encode_next_frame(
+    message: &[u8],
+    transfer_id: u16,
+    maximum_frame_bytes: usize,
+    total_length: u16,
+    checksum: u32,
+    offset: &mut usize,
+    output: &mut [u8],
+) -> Result<Option<usize>, FragmentError> {
+    if *offset == message.len() {
+        return Ok(None);
+    }
+    let payload_capacity = maximum_frame_bytes - BLE_FRAME_HEADER_BYTES;
+    let payload_length = payload_capacity.min(message.len() - *offset);
+    let frame_length = BLE_FRAME_HEADER_BYTES + payload_length;
+    if output.len() < frame_length {
+        return Err(FragmentError::OutputTooSmall);
+    }
+
+    let end_offset = *offset + payload_length;
+    let mut flags = 0;
+    if *offset == 0 {
+        flags |= BLE_START_FLAG;
+    }
+    if end_offset == message.len() {
+        flags |= BLE_END_FLAG;
+    }
+    output[0] = BLE_FRAME_VERSION;
+    output[1] = flags;
+    output[2..4].copy_from_slice(&transfer_id.to_be_bytes());
+    output[4..6].copy_from_slice(&total_length.to_be_bytes());
+    let fragment_offset = u16::try_from(*offset).map_err(|_| FragmentError::MessageTooLarge)?;
+    output[6..8].copy_from_slice(&fragment_offset.to_be_bytes());
+    output[8..12].copy_from_slice(&checksum.to_be_bytes());
+    output[12..frame_length].copy_from_slice(&message[*offset..end_offset]);
+    *offset = end_offset;
+    Ok(Some(frame_length))
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -180,6 +261,19 @@ impl Reassembler {
     pub fn reset(&mut self) {
         self.active = None;
         self.completed_length = None;
+    }
+
+    /// Drops an incomplete transfer after the registry timeout even when no
+    /// further fragment arrives.
+    #[must_use]
+    pub fn expire(&mut self, now_ms: u64) -> bool {
+        let timed_out = self.active.is_some_and(|active| {
+            now_ms.saturating_sub(active.last_accepted_at_ms) > BLE_REASSEMBLY_TIMEOUT_MS
+        });
+        if timed_out {
+            self.reset();
+        }
+        timed_out
     }
 
     #[must_use]

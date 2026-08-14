@@ -48,11 +48,11 @@
 
 ## 6. Bring Up the ESP32-C3 BLE Service
 
-- [ ] 6.1 Spike the maintained Rust surfaces over the pinned ESP-IDF NimBLE stack, prove a clean compile, and pin the smallest option that supports the required server callbacks or document the narrow `esp-idf-sys` fallback.
+- [x] 6.1 Spike the maintained Rust surfaces over the pinned ESP-IDF NimBLE stack, prove a clean compile, and pin the smallest option that supports the required server callbacks or document the narrow `esp-idf-sys` fallback.
 - [ ] 6.2 Advertise the custom Focus Timer service and prove physical iPhone discovery, connect, service discovery, command write, response notification, disconnect, and restart advertising with a bounded echo/handshake diagnostic.
-- [ ] 6.3 Implement the production BLE adapter, command/response characteristics, handshake gate, structured connection lifecycle, request timeouts, and diagnostic reporting without granting callbacks access to `App` or GPIO.
-- [ ] 6.4 Connect protocol requests to the immutable status cache, volatile clock anchor, and stateless journal-page reader through bounded mailboxes or copied snapshots.
-- [ ] 6.5 Integrate Rust fragmentation/reassembly at the GATT boundary and verify multi-fragment responses at default and negotiated payload sizes plus recovery after invalid transfers.
+- [x] 6.3 Implement the production BLE adapter, command/response characteristics, handshake gate, structured connection lifecycle, request timeouts, and diagnostic reporting without granting callbacks access to `App` or GPIO.
+- [x] 6.4 Connect protocol requests to the immutable status cache, volatile clock anchor, and stateless journal-page reader through bounded mailboxes or copied snapshots.
+- [x] 6.5 Integrate Rust fragmentation/reassembly at the GATT boundary and verify multi-fragment responses at default and negotiated payload sizes plus recovery after invalid transfers.
 - [ ] 6.6 Verify radio initialization failure, incompatible handshake, unknown command, malformed payload, disconnect, and notification failure cannot affect physical input, monotonic timing, OLED, buzzer, settings, or journal integrity.
 
 ## 7. Implement Local Mobile Persistence and Synchronization

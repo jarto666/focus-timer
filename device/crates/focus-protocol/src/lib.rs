@@ -25,6 +25,6 @@ pub use model::{
 };
 pub use transport::{
     BLE_END_FLAG, BLE_FRAME_HEADER_BYTES, BLE_FRAME_VERSION, BLE_REASSEMBLY_TIMEOUT_MS,
-    BLE_START_FLAG, FragmentError, Fragmenter, FrameHeader, Reassembler, ReassemblyError,
-    ReassemblyStatus, crc32_iso_hdlc, next_transfer_id, parse_frame,
+    BLE_START_FLAG, FragmentError, Fragmenter, FrameHeader, OwnedFragmenter, Reassembler,
+    ReassemblyError, ReassemblyStatus, crc32_iso_hdlc, next_transfer_id, parse_frame,
 };

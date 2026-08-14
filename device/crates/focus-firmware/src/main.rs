@@ -1,4 +1,6 @@
 #[cfg(not(feature = "diagnostic-firmware"))]
+mod ble_radio;
+#[cfg(not(feature = "diagnostic-firmware"))]
 mod clock;
 #[cfg(feature = "diagnostic-firmware")]
 mod diagnostics;

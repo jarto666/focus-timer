@@ -26,9 +26,18 @@ use focus_firmware::{
     input::EncoderInput,
     journal_adapter::{FlushOutcome as JournalFlushOutcome, OutcomeJournalQueue},
     presentation::{OLED_LAYOUT, OledView, oled_view},
+    protocol_projection::{session_page_response, status_response},
+    protocol_session::{ProtocolAction, ProtocolSession},
     settings::{FlushOutcome, QueueOutcome, SelectionPersistence, StoredSettings, load_settings},
 };
-use focus_sync::{JOURNAL_CAPACITY, PersistentJournal, VolatileClock};
+use focus_protocol::{
+    Capability, ClockAnchorResponse, ErrorCode, ErrorResponse, HelloResponse,
+    MAX_LOGICAL_MESSAGE_BYTES, ProtocolVersion, Response, ResponseEnvelope, decode_request,
+    encode_response,
+};
+use focus_sync::{
+    JOURNAL_CAPACITY, JournalStatus, PersistentJournal, VolatileClock, project_status,
+};
 use ssd1306::{
     I2CDisplayInterface, Ssd1306,
     mode::DisplayConfig,
@@ -36,6 +45,7 @@ use ssd1306::{
 };
 
 use crate::{
+    ble_radio::{BleRadio, NotificationProgress},
     clock::MonotonicClock,
     nvs_journal::{EspEntropy, NvsJournalStore},
     nvs_settings::NvsSettingsStore,
@@ -64,6 +74,9 @@ const RUNTIME_PRESETS: [Preset; 5] = [
 ];
 
 /// Owns application state and serializes semantic encoder and clock events.
+// Hardware acquisition, optional adapter setup, and the one authoritative
+// event loop are intentionally visible together for ownership auditing.
+#[allow(clippy::too_many_lines)]
 pub fn run() -> ! {
     let peripherals = Peripherals::take().expect("ESP32 peripherals must be available once");
 
@@ -204,7 +217,29 @@ pub fn run() -> ! {
     );
     let (mut app, boot_effects) = App::boot(catalog, boot_settings);
     let clock = MonotonicClock::new();
-    let wall_clock = VolatileClock::new();
+    let mut wall_clock = VolatileClock::new();
+    let mut protocol_session = session_journal
+        .as_ref()
+        .map(|journal| ProtocolSession::new(protocol_hello(journal.journal().device_id())));
+    let mut ble_radio = if protocol_session.is_some() {
+        match BleRadio::start() {
+            Ok(radio) => Some(radio),
+            Err(error) => {
+                log::error!(
+                    "BLE service initialization failed: {error:?}; continuing as a complete offline timer"
+                );
+                None
+            }
+        }
+    } else {
+        log::warn!(
+            "BLE service disabled because no stable journal identity is available; offline timer remains active"
+        );
+        None
+    };
+    let mut observed_ble_generation = ble_radio
+        .as_ref()
+        .map_or(0, |radio| radio.connection_snapshot().generation);
     let mut outcome_queue = OutcomeJournalQueue::new();
     let mut next_time_advance_ms = 0;
     let mut next_render_attempt_ms = 0;
@@ -298,6 +333,54 @@ pub fn run() -> ! {
             }
         }
 
+        if let (Some(radio), Some(session)) = (ble_radio.as_mut(), protocol_session.as_mut()) {
+            let connection = radio.connection_snapshot();
+            if connection.generation != observed_ble_generation {
+                observed_ble_generation = connection.generation;
+                session.reset();
+                log::info!(
+                    "BLE protocol session reset for connection generation={observed_ble_generation} connected={} subscribed={} mtu={}",
+                    connection.connected,
+                    connection.subscribed,
+                    connection.mtu
+                );
+            }
+
+            if let Some(message) = radio.take_request(now_ms) {
+                if message.connection_generation == observed_ble_generation {
+                    process_protocol_message(
+                        message.as_slice(),
+                        now_ms,
+                        session,
+                        radio,
+                        &app,
+                        session_journal.as_ref(),
+                        &mut wall_clock,
+                    );
+                } else {
+                    log::warn!(
+                        "discarded stale BLE request from generation={} current={observed_ble_generation}",
+                        message.connection_generation
+                    );
+                }
+            }
+
+            match radio.poll_notification() {
+                Ok(NotificationProgress::Idle | NotificationProgress::Sent) => {}
+                Ok(NotificationProgress::Complete) => {
+                    log::debug!("BLE logical response notification transfer complete");
+                }
+                Ok(NotificationProgress::DroppedConnection) => {
+                    log::warn!("BLE logical response dropped after connection lifecycle changed");
+                }
+                Err(error) => {
+                    log::warn!(
+                        "BLE notification failed; client may retry the read-only request: {error:?}"
+                    );
+                }
+            }
+        }
+
         let snapshot = app.snapshot(now_ms);
         let visible_second = visible_second(snapshot.remaining_ms);
         if rendered_second != Some(visible_second) {
@@ -332,6 +415,200 @@ pub fn run() -> ! {
     }
 }
 
+fn protocol_hello(device_id: [u8; 16]) -> HelloResponse {
+    let mut capabilities = heapless::Vec::new();
+    capabilities
+        .push(Capability::ReadStatus)
+        .expect("three capabilities fit the protocol registry");
+    capabilities
+        .push(Capability::ReadSessionPages)
+        .expect("three capabilities fit the protocol registry");
+    capabilities
+        .push(Capability::SetClockAnchor)
+        .expect("three capabilities fit the protocol registry");
+    HelloResponse {
+        device_id,
+        product_name: "FocusTimer"
+            .try_into()
+            .expect("product name fits the protocol registry"),
+        firmware_version: env!("CARGO_PKG_VERSION")
+            .try_into()
+            .expect("firmware version fits the protocol registry"),
+        supported_version: ProtocolVersion::CURRENT,
+        capabilities,
+    }
+}
+
+// Logical request handling remains in the owner loop and never runs inside a
+// `NimBLE` callback; the explicit inputs make that boundary reviewable.
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+fn process_protocol_message(
+    bytes: &[u8],
+    now_ms: u64,
+    session: &mut ProtocolSession,
+    radio: &mut BleRadio,
+    app: &App,
+    journal: Option<&PersistentJournal<NvsJournalStore, JOURNAL_CAPACITY>>,
+    wall_clock: &mut VolatileClock,
+) {
+    let request = match decode_request(bytes) {
+        Ok(request) => request,
+        Err(error) => {
+            log::warn!(
+                "BLE logical request decode failed: bytes={} error={error:?}; timer and journal were not mutated",
+                bytes.len()
+            );
+            radio.abandon_response();
+            return;
+        }
+    };
+    let action = session.handle(&request);
+    let response = match action {
+        ProtocolAction::Respond(response) => response,
+        ProtocolAction::ReadStatus {
+            request_id,
+            version,
+        } => match journal {
+            Some(journal) => {
+                let model = journal.journal();
+                let (oldest_sequence, latest_sequence) = model.bounds();
+                let status = project_status(
+                    app,
+                    now_ms,
+                    JournalStatus {
+                        epoch: model.epoch(),
+                        oldest_sequence,
+                        latest_sequence,
+                        health: model.health(),
+                    },
+                    *wall_clock,
+                );
+                match status_response(status) {
+                    Ok(status) => ResponseEnvelope {
+                        version,
+                        request_id,
+                        response: Response::Status(status),
+                    },
+                    Err(error) => {
+                        log::error!("BLE status projection failed: {error:?}");
+                        protocol_error(request_id, version, ErrorCode::InternalError, Some(3), None)
+                    }
+                }
+            }
+            None => protocol_error(
+                request_id,
+                version,
+                ErrorCode::JournalUnavailable,
+                Some(3),
+                None,
+            ),
+        },
+        ProtocolAction::ReadSessionPage {
+            request_id,
+            version,
+            page,
+        } => match journal {
+            Some(journal) => match journal.page::<8>(
+                page.journal_epoch,
+                page.after_sequence,
+                usize::from(page.limit),
+            ) {
+                Ok(page) => match session_page_response(&page) {
+                    Ok(page) => ResponseEnvelope {
+                        version,
+                        request_id,
+                        response: Response::SessionPage(page),
+                    },
+                    Err(error) => {
+                        log::error!("BLE journal page projection failed: {error:?}");
+                        protocol_error(request_id, version, ErrorCode::InternalError, Some(5), None)
+                    }
+                },
+                Err(error) => {
+                    log::warn!("BLE journal page request rejected: {error:?}");
+                    protocol_error(
+                        request_id,
+                        version,
+                        ErrorCode::InvalidField,
+                        Some(5),
+                        Some(2),
+                    )
+                }
+            },
+            None => protocol_error(
+                request_id,
+                version,
+                ErrorCode::JournalUnavailable,
+                Some(5),
+                None,
+            ),
+        },
+        ProtocolAction::SetClockAnchor {
+            request_id,
+            version,
+            utc_ms,
+        } => match wall_clock.set_anchor(utc_ms, now_ms) {
+            Ok(()) => ResponseEnvelope {
+                version,
+                request_id,
+                response: Response::ClockAnchor(ClockAnchorResponse {
+                    accepted_utc_ms: utc_ms,
+                    device_monotonic_ms_at_receipt: now_ms,
+                }),
+            },
+            Err(error) => {
+                log::warn!("BLE clock anchor rejected: {error:?}");
+                protocol_error(
+                    request_id,
+                    version,
+                    ErrorCode::InvalidField,
+                    Some(7),
+                    Some(0),
+                )
+            }
+        },
+    };
+
+    let mut encoded = [0; MAX_LOGICAL_MESSAGE_BYTES];
+    let length = match encode_response(&response, &mut encoded) {
+        Ok(length) => length,
+        Err(error) => {
+            log::error!("BLE logical response encoding failed: {error:?}");
+            radio.abandon_response();
+            return;
+        }
+    };
+    if let Err(error) = radio.queue_response(&encoded[..length]) {
+        log::warn!(
+            "BLE logical response could not enter bounded outbox: request_id={} error={error:?}",
+            response.request_id
+        );
+        radio.abandon_response();
+    }
+}
+
+fn protocol_error(
+    request_id: u32,
+    version: ProtocolVersion,
+    code: ErrorCode,
+    failed_message_kind: Option<u64>,
+    field_id: Option<u64>,
+) -> ResponseEnvelope {
+    ResponseEnvelope {
+        version,
+        request_id,
+        response: Response::Error(ErrorResponse {
+            code,
+            failed_message_kind,
+            field_id,
+            supported_version: None,
+        }),
+    }
+}
+
+// These are independent best-effort adapters observing one committed core
+// transition; grouping them avoids introducing another mutable state owner.
+#[allow(clippy::too_many_arguments)]
 fn process_event(
     app: &mut App,
     now_ms: u64,

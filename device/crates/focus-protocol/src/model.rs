@@ -230,7 +230,8 @@ pub enum Request {
 }
 
 impl Request {
-    pub(crate) const fn message_kind(&self) -> u64 {
+    #[must_use]
+    pub const fn message_kind(&self) -> u64 {
         match self {
             Self::Hello => 1,
             Self::GetStatus => 3,

@@ -137,6 +137,10 @@ diagnostics: it uses the production runtime and adapters with only the preset
 durations shortened to eight seconds. All production and diagnostic feature
 builds are checked after changing the routing or module layout.
 
+The BLE dependency choice, callback/mailbox boundary, echo diagnostic, GATT
+registry, and physical test procedure are documented separately in
+[`docs/ble-development.md`](ble-development.md).
+
 ## Archived WS2812 diagnostics (deferred from MVP)
 
 These feature builds are retained as evidence and as a possible starting point

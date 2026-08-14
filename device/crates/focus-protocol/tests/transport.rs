@@ -1,6 +1,6 @@
 use focus_protocol::{
-    BLE_FRAME_HEADER_BYTES, BLE_REASSEMBLY_TIMEOUT_MS, FragmentError, Fragmenter, Reassembler,
-    ReassemblyError, ReassemblyStatus, crc32_iso_hdlc, next_transfer_id,
+    BLE_FRAME_HEADER_BYTES, BLE_REASSEMBLY_TIMEOUT_MS, FragmentError, Fragmenter, OwnedFragmenter,
+    Reassembler, ReassemblyError, ReassemblyStatus, crc32_iso_hdlc, next_transfer_id,
 };
 
 fn frames(message: &[u8], transfer_id: u16, maximum_frame_bytes: usize) -> Vec<Vec<u8>> {
@@ -53,6 +53,37 @@ fn one_and_many_frame_messages_round_trip() {
 }
 
 #[test]
+fn owned_fragmenter_matches_the_borrowed_stream() {
+    let message = b"a response retained across many non-blocking event-loop ticks";
+    let maximum_frame_bytes = BLE_FRAME_HEADER_BYTES + 7;
+    let expected = frames(message, 19, maximum_frame_bytes);
+    let mut owned = OwnedFragmenter::new(message, 19, maximum_frame_bytes).unwrap();
+    let mut actual = Vec::new();
+    let mut output = vec![0; maximum_frame_bytes];
+    while let Some(length) = owned.next_frame(&mut output).unwrap() {
+        actual.push(output[..length].to_vec());
+    }
+    assert!(owned.is_complete());
+    assert_eq!(actual, expected);
+}
+
+#[test]
+fn maximum_response_round_trips_at_default_and_preferred_att_payloads() {
+    let message = [0xa5; focus_protocol::MAX_LOGICAL_MESSAGE_BYTES];
+    for maximum_frame_bytes in [20, 182] {
+        let packets = frames(&message, 44, maximum_frame_bytes);
+        assert!(packets.len() > 1);
+        let mut reassembler = Reassembler::new();
+        for (index, packet) in packets.iter().enumerate() {
+            reassembler
+                .accept_frame(packet, u64::try_from(index).unwrap())
+                .unwrap();
+        }
+        assert_eq!(reassembler.completed_message(), Some(message.as_slice()));
+    }
+}
+
+#[test]
 fn frame_header_is_big_endian_and_correlated() {
     let frames = frames(b"abc", 0x1234, 64);
     assert_eq!(frames.len(), 1);
@@ -85,6 +116,26 @@ fn timeout_and_bad_order_reset_the_single_active_transfer() {
         reassembler.accept_frame(&source[2], 20_010),
         Err(ReassemblyError::NonContiguousOffset)
     );
+}
+
+#[test]
+fn incomplete_transfer_expires_without_a_following_fragment() {
+    let message = [0x55; 40];
+    let packets = frames(&message, 8, 20);
+    let mut reassembler = Reassembler::new();
+    assert_eq!(
+        reassembler.accept_frame(&packets[0], 100).unwrap(),
+        ReassemblyStatus::InProgress
+    );
+    assert!(!reassembler.expire(100 + BLE_REASSEMBLY_TIMEOUT_MS));
+    assert!(reassembler.expire(101 + BLE_REASSEMBLY_TIMEOUT_MS));
+    assert_eq!(reassembler.completed_message(), None);
+
+    let retry = frames(&message, 9, 64);
+    assert!(matches!(
+        reassembler.accept_frame(&retry[0], 10_000),
+        Ok(ReassemblyStatus::Complete { .. })
+    ));
 }
 
 #[test]

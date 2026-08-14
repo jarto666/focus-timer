@@ -383,7 +383,8 @@ active MVP wiring or acceptance path; the ring is disconnected.
   and completion-dismissal lifecycle on the OLED.
 - The user confirmed the entire sequence operated correctly before reconnecting
   the device to the development computer. This is the physical evidence for
-  task 6.4; the firmware contains no Wi-Fi or Bluetooth setup path.
+  task 6.4. This evidence belongs to the preserved pre-BLE checkpoint: that
+  flashed image contained no Wi-Fi or Bluetooth setup path.
 
 ### Monorepo path-migration smoke — 2026-08-14
 
