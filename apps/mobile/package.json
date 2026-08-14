@@ -4,6 +4,8 @@
   "version": "1.0.0",
   "dependencies": {
     "@expo/ui": "~57.0.10",
+    "@focus-timer/device-client": "workspace:*",
+    "@focus-timer/mock-device": "workspace:*",
     "expo": "~57.0.12",
     "expo-constants": "~57.0.10",
     "expo-dev-client": "~57.0.11",

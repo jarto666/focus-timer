@@ -2,34 +2,143 @@ import { Link } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { useCompanionRuntime } from '@/application/runtime-provider';
 import { Page } from '@/ui/page';
 import { Sigil } from '@/ui/sigil';
 import { color, radius, space } from '@/ui/theme';
 
+function formatTimer(milliseconds: number): string {
+  const totalSeconds = Math.max(0, Math.floor(milliseconds / 1_000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
+function connectionCopy(phase: ReturnType<typeof useCompanionRuntime>['connection']['phase']) {
+  switch (phase) {
+    case 'ready':
+      return {
+        eyebrow: 'DEVICE // LINKED',
+        title: 'Ready when you are.',
+        detail: 'Your physical timer owns the session. Muninn observes and remembers.',
+        badge: 'READY',
+        dial: 'DEVICE IDLE',
+        pairLabel: 'View timer',
+        pairDetail: 'Connection and device status',
+      };
+    case 'scanning':
+      return {
+        eyebrow: 'DEVICE // SEARCHING',
+        title: 'Signal detected.',
+        detail: 'A nearby Focus Timer is available to connect.',
+        badge: 'SCANNING',
+        dial: 'SEARCHING',
+        pairLabel: 'Continue setup',
+        pairDetail: 'Choose the nearby timer',
+      };
+    case 'connecting':
+    case 'handshaking':
+      return {
+        eyebrow: 'DEVICE // LINKING',
+        title: 'Opening the link.',
+        detail: 'Muninn is verifying the nearby timer before reading any data.',
+        badge: 'LINKING',
+        dial: 'VERIFYING',
+        pairLabel: 'View connection',
+        pairDetail: 'Handshake in progress',
+      };
+    case 'unavailable':
+      return {
+        eyebrow: 'DEVICE // UNAVAILABLE',
+        title: 'Timer out of reach.',
+        detail: 'Local history remains available while the device is offline.',
+        badge: 'OFFLINE',
+        dial: 'NO SIGNAL',
+        pairLabel: 'Try again',
+        pairDetail: 'Check the nearby timer',
+      };
+    case 'permission-denied':
+      return {
+        eyebrow: 'DEVICE // BLOCKED',
+        title: 'Bluetooth access needed.',
+        detail: 'Muninn cannot discover hardware until permission is restored.',
+        badge: 'BLOCKED',
+        dial: 'NO ACCESS',
+        pairLabel: 'Review connection',
+        pairDetail: 'See the recovery path',
+      };
+    case 'incompatible':
+      return {
+        eyebrow: 'DEVICE // UNSUPPORTED',
+        title: 'Update required.',
+        detail: 'The timer speaks a protocol version this build cannot read safely.',
+        badge: 'VERSION',
+        dial: 'READ DISABLED',
+        pairLabel: 'View details',
+        pairDetail: 'Inspect compatibility',
+      };
+    case 'retryable-error':
+      return {
+        eyebrow: 'DEVICE // INTERRUPTED',
+        title: 'The link broke.',
+        detail: 'Nothing local was discarded. You can retry the connection.',
+        badge: 'RETRY',
+        dial: 'LINK LOST',
+        pairLabel: 'Retry connection',
+        pairDetail: 'Resume from saved progress',
+      };
+    case 'disconnected':
+      return {
+        eyebrow: 'DEVICE // UNPAIRED',
+        title: 'Unpaired.',
+        detail: 'No Focus Timer is linked to this iPhone.',
+        badge: 'OFFLINE',
+        dial: 'AWAITING DEVICE',
+        pairLabel: 'Pair a timer',
+        pairDetail: 'Search nearby hardware',
+      };
+  }
+}
+
 export default function HomeScreen() {
+  const { connection, history, status } = useCompanionRuntime();
+  const copy = connectionCopy(connection.phase);
+  const ready = connection.phase === 'ready';
+  const entryCount = String(history.entries.length).padStart(2, '0');
+
   return (
     <Page>
       <View style={styles.heading}>
-        <Text style={styles.eyebrow}>DEVICE // 00</Text>
+        <Text style={styles.eyebrow}>{copy.eyebrow}</Text>
         <Text accessibilityRole="header" style={styles.title}>
-          Unpaired.
+          {copy.title}
         </Text>
-        <Text style={styles.headingDetail}>No Focus Timer is linked to this iPhone.</Text>
+        <Text style={styles.headingDetail}>{copy.detail}</Text>
       </View>
 
       <View style={styles.timerPanel}>
         <View style={styles.panelHeader}>
           <View>
             <Text style={styles.deviceName}>Focus Timer</Text>
-            <Text style={styles.deviceMeta}>No device linked</Text>
+            <Text style={styles.deviceMeta}>
+              {ready ? 'Read-only device state' : 'No active device link'}
+            </Text>
           </View>
           <View style={styles.statusBadge}>
-            <View style={styles.offlineDot} />
-            <Text style={styles.statusLabel}>OFFLINE</Text>
+            <View style={[styles.offlineDot, ready && styles.readyDot]} />
+            <Text style={[styles.statusLabel, ready && styles.readyStatusLabel]}>{copy.badge}</Text>
           </View>
         </View>
 
-        <View accessible accessibilityLabel="Timer is offline" style={styles.dialStage}>
+        <View
+          accessible
+          accessibilityLabel={
+            status === null
+              ? `Timer ${copy.dial.toLowerCase()}`
+              : `${status.presetName}, ${formatTimer(status.remainingDurationMs)} remaining`
+          }
+          style={styles.dialStage}
+        >
           <View style={[styles.tick, styles.tickTop]} />
           <View style={[styles.tick, styles.tickRight]} />
           <View style={[styles.tick, styles.tickBottom]} />
@@ -38,8 +147,10 @@ export default function HomeScreen() {
             <View style={styles.arc} />
             <View style={styles.innerDial}>
               <Sigil name="time" size={28} />
-              <Text style={styles.time}>--:--</Text>
-              <Text style={styles.dialLabel}>AWAITING DEVICE</Text>
+              <Text style={styles.time}>
+                {status === null ? '--:--' : formatTimer(status.remainingDurationMs)}
+              </Text>
+              <Text style={styles.dialLabel}>{copy.dial}</Text>
             </View>
           </View>
         </View>
@@ -49,7 +160,9 @@ export default function HomeScreen() {
             <View style={styles.footerGlyphCore} />
           </View>
           <Text style={styles.panelMessage}>
-            Pair your physical timer to sync sessions and see its live state.
+            {ready
+              ? 'Status is read-only. Sessions still start, pause, and finish on the physical timer.'
+              : 'Pair your physical timer to sync sessions and see its live state.'}
           </Text>
         </View>
       </View>
@@ -60,8 +173,8 @@ export default function HomeScreen() {
             <Sigil name="bifrost" size={34} />
           </View>
           <View style={styles.pairCopy}>
-            <Text style={styles.pairLabel}>Pair a timer</Text>
-            <Text style={styles.pairDetail}>Search nearby hardware</Text>
+            <Text style={styles.pairLabel}>{copy.pairLabel}</Text>
+            <Text style={styles.pairDetail}>{copy.pairDetail}</Text>
           </View>
           <SymbolView
             fallback={<Text style={styles.pairChevronFallback}>›</Text>}
@@ -85,7 +198,7 @@ export default function HomeScreen() {
 
           <View style={styles.ledgerBody}>
             <View style={styles.countBlock}>
-              <Text style={styles.ledgerCount}>00</Text>
+              <Text style={styles.ledgerCount}>{entryCount}</Text>
               <Text style={styles.ledgerUnit}>ENTRIES</Text>
             </View>
             <View style={styles.ledgerRule} />
@@ -185,11 +298,20 @@ const styles = StyleSheet.create({
     height: 6,
     width: 6,
   },
+  readyDot: {
+    backgroundColor: color.accent,
+    shadowColor: color.accent,
+    shadowOpacity: 0.9,
+    shadowRadius: 6,
+  },
   statusLabel: {
     color: color.mutedText,
     fontSize: 9,
     fontWeight: '800',
     letterSpacing: 1.1,
+  },
+  readyStatusLabel: {
+    color: color.accent,
   },
   dialStage: {
     alignItems: 'center',

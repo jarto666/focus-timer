@@ -1,5 +1,6 @@
 const { defineConfig, globalIgnores } = require('eslint/config');
 const expoConfig = require('eslint-config-expo/flat');
+const path = require('node:path');
 
 module.exports = defineConfig([
   globalIgnores([
@@ -15,7 +16,10 @@ module.exports = defineConfig([
     settings: {
       'import/resolver': {
         typescript: {
-          project: ['apps/mobile/tsconfig.json', 'packages/*/tsconfig.json'],
+          project: [
+            path.join(__dirname, 'apps/mobile/tsconfig.json'),
+            path.join(__dirname, 'packages/*/tsconfig.json'),
+          ],
         },
       },
     },

@@ -14,8 +14,8 @@
 - [x] 2.2 Scaffold the Expo/React Native/TypeScript application with Expo Router, document mock versus physical configuration, and keep screen code independent of the selected transport.
 - [x] 2.3 Produce and install a minimal Expo Development Build on the physical iPhone through Xcode, then pin the proven Node.js, pnpm, Expo SDK, React Native, iOS target, and native dependency versions.
 - [x] 2.4 Define and test the transport-neutral connection-state and `DeviceTransport` contracts, including unavailable, permission-denied, scanning, connecting, handshaking, ready, disconnected, incompatible, and retryable-error states.
-- [ ] 2.5 Implement a deterministic mock transport/device with empty, paged, duplicated, gap, changed-epoch, disconnect, incompatible-version, malformed-response, and unavailable-device scenarios.
-- [ ] 2.6 Build the first mock-backed device setup/status and local-history screen states, including honest untimestamped and incomplete-history presentation, without adding remote timer controls.
+- [x] 2.5 Implement a deterministic mock transport/device with empty, paged, duplicated, gap, changed-epoch, disconnect, incompatible-version, malformed-response, and unavailable-device scenarios.
+- [x] 2.6 Build the first mock-backed device setup/status and local-history screen states, including honest untimestamped and incomplete-history presentation, without adding remote timer controls.
 
 ## 3. Define and Prove the Cross-Language Protocol
 
