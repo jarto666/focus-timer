@@ -19,7 +19,7 @@
 
 ## 3. Define and Prove the Cross-Language Protocol
 
-- [ ] 3.1 Write the protocol schema registry with service/characteristic UUIDs, protocol version policy, numeric message/field identifiers, constrained-CBOR rules, string/page/message limits, error codes, and BLE frame format.
+- [x] 3.1 Write the protocol schema registry with service/characteristic UUIDs, protocol version policy, numeric message/field identifiers, constrained-CBOR rules, string/page/message limits, error codes, and BLE frame format.
 - [ ] 3.2 Add the `focus-protocol` Rust crate with bounded logical models and explicit canonical codecs for handshake, status, session pages, clock anchors, and structured errors.
 - [ ] 3.3 Implement the matching TypeScript logical models and explicit canonical codecs in `packages/device-protocol` without generic object serialization.
 - [ ] 3.4 Implement bounded BLE fragmentation and reassembly codecs in Rust and TypeScript with transfer correlation, contiguous offsets, checksum validation, timeout reset, and one in-progress transfer limit.
