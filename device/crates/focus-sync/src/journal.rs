@@ -67,6 +67,7 @@ pub enum JournalError {
     RetainedRecordsOutOfOrder,
     TooManyRetainedRecords,
     SequenceExhausted,
+    UnexpectedSequence,
     InvalidPageLimit,
 }
 
@@ -197,20 +198,48 @@ impl<const CAPACITY: usize> Journal<CAPACITY> {
     /// Returns [`JournalError::SequenceExhausted`] before sequence reuse; the
     /// storage adapter must provision a new epoch to continue.
     pub fn append(&mut self, pending: PendingRecord) -> Result<u64, JournalError> {
-        let sequence = self
-            .high_water_sequence
-            .checked_add(1)
-            .filter(|sequence| *sequence <= MAX_JOURNAL_SEQUENCE)
-            .ok_or(JournalError::SequenceExhausted)?;
+        let record = self.prepare(pending)?;
+        let sequence = record.sequence;
+        self.commit(record)?;
+        Ok(sequence)
+    }
+
+    /// Builds the next record without changing the in-memory journal. Storage
+    /// adapters use this to persist a slot before committing metadata/state.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`JournalError::SequenceExhausted`] before sequence reuse.
+    pub fn prepare(&self, pending: PendingRecord) -> Result<JournalRecord, JournalError> {
+        let sequence = self.next_sequence()?;
+        Ok(JournalRecord::from_pending(sequence, pending))
+    }
+
+    /// Commits a previously prepared next record to the bounded ring.
+    ///
+    /// # Errors
+    ///
+    /// Rejects a record that is not exactly the next monotonic sequence.
+    pub fn commit(&mut self, record: JournalRecord) -> Result<(), JournalError> {
+        if record.sequence != self.next_sequence()? {
+            return Err(JournalError::UnexpectedSequence);
+        }
 
         if self.records.is_full() {
             let _evicted = self.records.pop_front();
         }
         self.records
-            .push_back(JournalRecord::from_pending(sequence, pending))
+            .push_back(record)
             .map_err(|_| JournalError::ZeroCapacity)?;
-        self.high_water_sequence = sequence;
-        Ok(sequence)
+        self.high_water_sequence = self.records.back().map_or(0, |record| record.sequence);
+        Ok(())
+    }
+
+    fn next_sequence(&self) -> Result<u64, JournalError> {
+        self.high_water_sequence
+            .checked_add(1)
+            .filter(|sequence| *sequence <= MAX_JOURNAL_SEQUENCE)
+            .ok_or(JournalError::SequenceExhausted)
     }
 
     /// Returns a stateless ascending page for a client cursor.

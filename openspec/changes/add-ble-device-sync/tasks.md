@@ -38,12 +38,12 @@
 
 ## 5. Persist and Integrate the Device Journal
 
-- [ ] 5.1 Inspect and document the actual NVS partition size and entry overhead, measure the encoded maximum record, select the evidence-backed fixed capacity from the initial target of 64, and keep the existing settings namespace unchanged.
-- [ ] 5.2 Implement versioned checksummed codecs and redundant metadata for the separate `focus_sync` namespace, including provisioned device identity, journal epoch, high-water position, and fixed slots.
-- [ ] 5.3 Implement NVS initialization, atomic slot-first append, metadata commit, boot reconciliation, eviction, bounded page reads, stable identity recovery, and new-epoch recovery from irrecoverable journal ambiguity.
-- [ ] 5.4 Queue committed core outcomes to the journal only after state transition, attach optional clock-derived timestamps, retry at most one failed pending append with bounded backoff, and expose degradation without blocking the event loop.
-- [ ] 5.5 Add host adapter tests for first boot, append/reboot, power-loss commit boundaries, corrupt slot, corrupt metadata, lost identity, new epoch, failed append, retry, eviction, and selected-preset namespace isolation.
-- [ ] 5.6 Add focused journal clear/corrupt/fill diagnostics that cannot alter the production timer contract and document safe commands and expected recovery logs.
+- [x] 5.1 Inspect and document the actual NVS partition size and entry overhead, measure the encoded maximum record, select the evidence-backed fixed capacity from the initial target of 64, and keep the existing settings namespace unchanged.
+- [x] 5.2 Implement versioned checksummed codecs and redundant metadata for the separate `focus_sync` namespace, including provisioned device identity, journal epoch, high-water position, and fixed slots.
+- [x] 5.3 Implement NVS initialization, atomic slot-first append, metadata commit, boot reconciliation, eviction, bounded page reads, stable identity recovery, and new-epoch recovery from irrecoverable journal ambiguity.
+- [x] 5.4 Queue committed core outcomes to the journal only after state transition, attach optional clock-derived timestamps, retry at most one failed pending append with bounded backoff, and expose degradation without blocking the event loop.
+- [x] 5.5 Add host adapter tests for first boot, append/reboot, power-loss commit boundaries, corrupt slot, corrupt metadata, lost identity, new epoch, failed append, retry, eviction, and selected-preset namespace isolation.
+- [x] 5.6 Add focused journal clear/corrupt/fill diagnostics that cannot alter the production timer contract and document safe commands and expected recovery logs.
 - [ ] 5.7 Validate on hardware that completion and running/paused cancellation append exactly once, records survive reboot, eviction reports a gap, clock-known and clock-unknown records differ correctly, and injected journal failure leaves the timer usable.
 
 ## 6. Bring Up the ESP32-C3 BLE Service

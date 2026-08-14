@@ -1,21 +1,30 @@
 //! Complete alternative firmware entrypoints selected by Cargo features.
 
-#[cfg(not(any(
-    feature = "ring-diagnostic",
-    feature = "encoder-diagnostic",
-    feature = "oled-diagnostic",
-    feature = "buzzer-diagnostic",
-    feature = "settings-clear-diagnostic",
-    feature = "settings-corrupt-diagnostic"
-)))]
-compile_error!(
-    "`diagnostic-firmware` is an internal aggregate; select one concrete diagnostic feature"
+const DIAGNOSTIC_COUNT: usize = cfg!(feature = "ring-diagnostic") as usize
+    + cfg!(feature = "encoder-diagnostic") as usize
+    + cfg!(feature = "oled-diagnostic") as usize
+    + cfg!(feature = "buzzer-diagnostic") as usize
+    + cfg!(feature = "settings-clear-diagnostic") as usize
+    + cfg!(feature = "settings-corrupt-diagnostic") as usize
+    + cfg!(feature = "journal-clear-diagnostic") as usize
+    + cfg!(feature = "journal-corrupt-diagnostic") as usize
+    + cfg!(feature = "journal-fill-diagnostic") as usize;
+
+const _: () = assert!(
+    DIAGNOSTIC_COUNT == 1,
+    "select exactly one concrete diagnostic feature"
 );
 
 #[cfg(feature = "buzzer-diagnostic")]
 mod buzzer;
 #[cfg(feature = "encoder-diagnostic")]
 mod encoder;
+#[cfg(any(
+    feature = "journal-clear-diagnostic",
+    feature = "journal-corrupt-diagnostic",
+    feature = "journal-fill-diagnostic"
+))]
+mod journal;
 #[cfg(feature = "oled-diagnostic")]
 mod oled;
 #[cfg(feature = "ring-diagnostic")]
@@ -25,31 +34,6 @@ mod ring;
     feature = "settings-corrupt-diagnostic"
 ))]
 mod settings;
-
-#[cfg(any(
-    all(feature = "ring-diagnostic", feature = "encoder-diagnostic"),
-    all(feature = "ring-diagnostic", feature = "oled-diagnostic"),
-    all(feature = "ring-diagnostic", feature = "buzzer-diagnostic"),
-    all(feature = "encoder-diagnostic", feature = "oled-diagnostic"),
-    all(feature = "encoder-diagnostic", feature = "buzzer-diagnostic"),
-    all(feature = "oled-diagnostic", feature = "buzzer-diagnostic"),
-    all(feature = "ring-diagnostic", feature = "settings-clear-diagnostic"),
-    all(feature = "ring-diagnostic", feature = "settings-corrupt-diagnostic"),
-    all(feature = "encoder-diagnostic", feature = "settings-clear-diagnostic"),
-    all(
-        feature = "encoder-diagnostic",
-        feature = "settings-corrupt-diagnostic"
-    ),
-    all(feature = "oled-diagnostic", feature = "settings-clear-diagnostic"),
-    all(feature = "oled-diagnostic", feature = "settings-corrupt-diagnostic"),
-    all(feature = "buzzer-diagnostic", feature = "settings-clear-diagnostic"),
-    all(feature = "buzzer-diagnostic", feature = "settings-corrupt-diagnostic"),
-    all(
-        feature = "settings-clear-diagnostic",
-        feature = "settings-corrupt-diagnostic"
-    )
-))]
-compile_error!("select exactly one hardware diagnostic feature");
 
 pub(super) fn run() {
     #[cfg(feature = "ring-diagnostic")]
@@ -69,4 +53,11 @@ pub(super) fn run() {
         feature = "settings-corrupt-diagnostic"
     ))]
     settings::run();
+
+    #[cfg(any(
+        feature = "journal-clear-diagnostic",
+        feature = "journal-corrupt-diagnostic",
+        feature = "journal-fill-diagnostic"
+    ))]
+    journal::run();
 }

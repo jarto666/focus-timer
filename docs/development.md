@@ -84,7 +84,9 @@ then passed from `device/crates/focus-firmware`, followed by successful builds
 of `ring-diagnostic`, `ring-full-diagnostic`, `ring-capped-diagnostic`,
 `encoder-diagnostic`, `oled-diagnostic`, `buzzer-diagnostic`,
 `acceptance-diagnostic`, `settings-clear-diagnostic`, and
-`settings-corrupt-diagnostic`. The default firmware was rebuilt last.
+`settings-corrupt-diagnostic`. Journal diagnostics were added after this
+path-only checkpoint and are covered separately below. The default firmware
+was rebuilt last.
 
 The post-move debug ELF is 16,689,056 bytes with SHA-256
 `90fbe07ac7be200ed62a76c8bab2818781a309265f716b8691fd2d46c7d2aff6`.
@@ -345,6 +347,41 @@ coalescing, unchanged-selection write avoidance, and a simulated commit
 failure that cannot revert selection or prevent session start. Hardware NVS
 restore, clear, corrupt fallback, and fallback-session-start paths passed on
 2026-08-13; see `docs/hardware.md`.
+
+## Session-journal NVS diagnostics
+
+The journal diagnostics are complete alternative firmware images. They open
+only the `focus_sync` namespace and never open or erase the production
+`focus_timer` settings namespace. Select exactly one mode at a time, flash it,
+observe its single completion log, and rebuild/flash the default firmware
+before using the timer again.
+
+```sh
+cd device/crates/focus-firmware
+
+# Remove identity, metadata, and slots only from focus_sync.
+cargo build --features journal-clear-diagnostic
+
+# Corrupt both metadata copies and slot s00 only in focus_sync.
+cargo build --features journal-corrupt-diagnostic
+
+# Append 65 synthetic outcomes, forcing the 64-slot journal to evict once.
+cargo build --features journal-fill-diagnostic
+
+# Always restore the production image after the selected experiment.
+cargo build
+```
+
+Flash a selected build using the standard `espflash flash` command above. The
+clear diagnostic logs `JOURNAL CLEAR DIAGNOSTIC`; the next production boot must
+provision a fresh identity and epoch while leaving the selected timer preset
+unchanged. The corrupt diagnostic logs `JOURNAL CORRUPT DIAGNOSTIC`; the next
+production boot must report a degraded recovery (or a clean rotated epoch when
+no unambiguous valid slot remains) and still enter the normal input/OLED loop.
+The fill diagnostic logs bounds, high-water sequence, and
+`stale_cursor_gap=true`; it intentionally logs no session payload. These are
+destructive journal tests, so do not run them when retained session history is
+valuable.
 
 ## Active-buzzer diagnostic
 

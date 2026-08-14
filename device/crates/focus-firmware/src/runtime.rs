@@ -17,22 +17,29 @@ use esp_idf_svc::hal::{
     peripherals::Peripherals,
     units::KiloHertz,
 };
+use esp_idf_svc::nvs::EspDefaultNvsPartition;
 #[cfg(not(feature = "acceptance-diagnostic"))]
 use focus_core::DEFAULT_PRESETS;
 use focus_core::{App, Catalog, Effects, InputEvent, Preset, SettingsLoad};
 use focus_firmware::{
     buzzer::BuzzerCadence,
     input::EncoderInput,
+    journal_adapter::{FlushOutcome as JournalFlushOutcome, OutcomeJournalQueue},
     presentation::{OLED_LAYOUT, OledView, oled_view},
     settings::{FlushOutcome, QueueOutcome, SelectionPersistence, StoredSettings, load_settings},
 };
+use focus_sync::{JOURNAL_CAPACITY, PersistentJournal, VolatileClock};
 use ssd1306::{
     I2CDisplayInterface, Ssd1306,
     mode::DisplayConfig,
     prelude::{DisplayRotation, DisplaySize128x64},
 };
 
-use crate::{clock::MonotonicClock, nvs_settings::NvsSettingsStore};
+use crate::{
+    clock::MonotonicClock,
+    nvs_journal::{EspEntropy, NvsJournalStore},
+    nvs_settings::NvsSettingsStore,
+};
 
 const INPUT_POLL_INTERVAL: Duration = Duration::from_millis(1);
 const TIME_ADVANCE_INTERVAL_MS: u64 = 10;
@@ -112,14 +119,58 @@ pub fn run() -> ! {
     display.init().expect("SSD1306 initialization must succeed");
 
     let catalog = Catalog::new(&RUNTIME_PRESETS, 2).expect("firmware catalog must be valid");
-    let mut settings_store = match NvsSettingsStore::open() {
-        Ok(store) => Some(store),
+    let nvs_partition = match EspDefaultNvsPartition::take() {
+        Ok(partition) => Some(partition),
         Err(error) => {
             log::error!(
-                "settings NVS unavailable: {error:?}; booting with the default and continuing without persistence"
+                "default NVS partition unavailable: {error:?}; continuing without settings or journal persistence"
             );
             None
         }
+    };
+    let mut settings_store = match nvs_partition.as_ref() {
+        Some(partition) => match NvsSettingsStore::open(partition.clone()) {
+            Ok(store) => Some(store),
+            Err(error) => {
+                log::error!(
+                    "settings NVS unavailable: {error:?}; booting with the default and continuing without selection persistence"
+                );
+                None
+            }
+        },
+        None => None,
+    };
+    let mut entropy = EspEntropy;
+    let mut session_journal = match nvs_partition.as_ref() {
+        Some(partition) => match NvsJournalStore::open(partition.clone()) {
+            Ok(store) => {
+                match PersistentJournal::<_, JOURNAL_CAPACITY>::initialize(store, &mut entropy) {
+                    Ok((journal, report)) => {
+                        log::info!(
+                            "session journal ready: device={:02x?} epoch={:02x?} bounds={:?} health={:?} init={report:?}",
+                            journal.journal().device_id(),
+                            journal.journal().epoch(),
+                            journal.journal().bounds(),
+                            journal.journal().health(),
+                        );
+                        Some(journal)
+                    }
+                    Err(error) => {
+                        log::error!(
+                            "session journal initialization failed: {error:?}; timer remains usable without synchronization durability"
+                        );
+                        None
+                    }
+                }
+            }
+            Err(error) => {
+                log::error!(
+                    "focus_sync NVS namespace unavailable: {error:?}; timer remains usable without synchronization durability"
+                );
+                None
+            }
+        },
+        None => None,
     };
     let mut settings_read_failed = settings_store.is_none();
     let loaded_settings = settings_store
@@ -153,6 +204,8 @@ pub fn run() -> ! {
     );
     let (mut app, boot_effects) = App::boot(catalog, boot_settings);
     let clock = MonotonicClock::new();
+    let wall_clock = VolatileClock::new();
+    let mut outcome_queue = OutcomeJournalQueue::new();
     let mut next_time_advance_ms = 0;
     let mut next_render_attempt_ms = 0;
     let mut render_pending = boot_effects.render;
@@ -180,6 +233,8 @@ pub fn run() -> ! {
                 &mut buzzer_cadence,
                 &mut buzzer_output,
                 &mut selection_persistence,
+                &mut outcome_queue,
+                wall_clock,
             );
         }
         if let Some(event) = events.button {
@@ -191,6 +246,8 @@ pub fn run() -> ! {
                 &mut buzzer_cadence,
                 &mut buzzer_output,
                 &mut selection_persistence,
+                &mut outcome_queue,
+                wall_clock,
             );
         }
 
@@ -203,6 +260,8 @@ pub fn run() -> ! {
                 &mut buzzer_cadence,
                 &mut buzzer_output,
                 &mut selection_persistence,
+                &mut outcome_queue,
+                wall_clock,
             );
             next_time_advance_ms = now_ms.saturating_add(TIME_ADVANCE_INTERVAL_MS);
         }
@@ -220,6 +279,20 @@ pub fn run() -> ! {
                 Err(error) => {
                     log::error!(
                         "settings write failed: {error:?}; keeping the in-memory selection and waiting for a later selection change"
+                    );
+                }
+            }
+        }
+
+        if let Some(journal) = session_journal.as_mut() {
+            match outcome_queue.flush_due(now_ms, journal) {
+                JournalFlushOutcome::Idle | JournalFlushOutcome::Waiting => {}
+                JournalFlushOutcome::Saved { sequence } => {
+                    log::info!("session journal append committed: sequence={sequence}");
+                }
+                JournalFlushOutcome::Failed { error } => {
+                    log::error!(
+                        "session journal append failed: {error:?}; retaining one pending outcome for bounded retry"
                     );
                 }
             }
@@ -267,8 +340,23 @@ fn process_event(
     buzzer_cadence: &mut BuzzerCadence,
     buzzer_output: &mut Option<PinDriver<'_, Output>>,
     selection_persistence: &mut SelectionPersistence,
+    outcome_queue: &mut OutcomeJournalQueue,
+    wall_clock: VolatileClock,
 ) {
+    let before = app.snapshot(now_ms).state;
     let effects = app.handle(now_ms, event);
+    let after = app.snapshot(now_ms).state;
+    match outcome_queue.observe(before, after, now_ms, effects.outcome, wall_clock) {
+        Ok(focus_firmware::journal_adapter::ObserveOutcome::NoRecord) => {}
+        Ok(focus_firmware::journal_adapter::ObserveOutcome::Queued) => {
+            log::info!("committed session outcome queued for journal append");
+        }
+        Err(error) => {
+            log::error!(
+                "committed session outcome could not enter the bounded journal queue: {error:?}; timer transition remains committed"
+            );
+        }
+    }
     if event != InputEvent::TimeAdvanced {
         log::info!("input event: {event:?}");
     }

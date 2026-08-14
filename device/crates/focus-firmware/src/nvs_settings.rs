@@ -29,8 +29,7 @@ pub struct NvsSettingsStore {
 }
 
 impl NvsSettingsStore {
-    pub fn open() -> Result<Self, EspError> {
-        let partition = EspDefaultNvsPartition::take()?;
+    pub fn open(partition: EspDefaultNvsPartition) -> Result<Self, EspError> {
         let nvs = EspDefaultNvs::new(partition, NAMESPACE, true)?;
         Ok(Self { nvs })
     }

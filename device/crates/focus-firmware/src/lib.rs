@@ -7,5 +7,6 @@
 
 pub mod buzzer;
 pub mod input;
+pub mod journal_adapter;
 pub mod presentation;
 pub mod settings;

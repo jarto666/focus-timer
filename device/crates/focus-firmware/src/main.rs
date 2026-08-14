@@ -2,6 +2,11 @@
 mod clock;
 #[cfg(feature = "diagnostic-firmware")]
 mod diagnostics;
+#[cfg(any(
+    not(feature = "diagnostic-firmware"),
+    feature = "journal-fill-diagnostic"
+))]
+mod nvs_journal;
 #[cfg(not(feature = "diagnostic-firmware"))]
 mod nvs_settings;
 #[cfg(not(feature = "diagnostic-firmware"))]
