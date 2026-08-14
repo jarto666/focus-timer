@@ -25,7 +25,7 @@
 - [x] 3.4 Implement bounded BLE fragmentation and reassembly codecs in Rust and TypeScript with transfer correlation, contiguous offsets, checksum validation, timeout reset, and one in-progress transfer limit.
 - [x] 3.5 Commit shared golden fixtures for every message kind and edge value, and gate both Rust and TypeScript encoders/decoders on byte-identical output and historical-fixture decoding.
 - [x] 3.6 Add malformed, truncated, duplicate-key, out-of-order-fragment, checksum, unsupported-message, incompatible-version, and oversized-input tests proving bounded recovery with no panic.
-- [ ] 3.7 Add the protocol compatibility check to the root workflows and document the rule that committed identifiers and fixtures require an explicit version transition rather than in-place reinterpretation.
+- [x] 3.7 Add the protocol compatibility check to the root workflows and document the rule that committed identifiers and fixtures require an explicit version transition rather than in-place reinterpretation.
 
 ## 4. Emit Session Outcomes and Model the Journal on the Host
 

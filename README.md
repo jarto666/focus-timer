@@ -23,6 +23,8 @@ The Rust workspace currently contains:
   behavior.
 - `device/crates/focus-firmware`: `std + ESP-IDF` executable and hardware
   adapters.
+- `device/crates/focus-protocol`: `no_std` logical protocol, canonical CBOR,
+  and bounded BLE framing/reassembly.
 
 ## Prerequisites and checks
 
@@ -44,6 +46,9 @@ pnpm install --frozen-lockfile
 ./scripts/check-mobile.sh
 ./scripts/check-protocol.sh
 ./scripts/check-all.sh
+# equivalent root package aliases:
+pnpm check:protocol
+pnpm check:all
 ```
 
 See [docs/development.md](docs/development.md) for development and flash

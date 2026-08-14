@@ -4,5 +4,7 @@
 - `build-firmware.sh`: default or feature-selected ESP32 firmware build.
 - `flash-firmware.sh`: build, flash, and monitor a connected controller.
 - `check-mobile.sh`: mobile/package checks once the pnpm workspace exists.
-- `check-protocol.sh`: Rust/TypeScript protocol compatibility checks.
-- `check-all.sh`: combined non-hardware validation.
+- `check-protocol.sh`: required Rust/TypeScript/shared-fixture compatibility
+  gate, including format, lint, type, canonical-byte, malformed-input, and
+  recovery tests.
+- `check-all.sh`: combined non-hardware validation; includes the protocol gate.

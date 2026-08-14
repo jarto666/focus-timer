@@ -8,6 +8,8 @@
     "pnpm": "10.32.1"
   },
   "scripts": {
+    "check:all": "./scripts/check-all.sh",
+    "check:protocol": "./scripts/check-protocol.sh",
     "format": "prettier --check .",
     "format:write": "prettier --write .",
     "lint": "eslint apps/mobile packages",
