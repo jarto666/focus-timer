@@ -26,7 +26,7 @@ pub enum SettingsFallback {
 /// Resolves persisted settings to a valid catalog index and optional diagnostic.
 #[must_use]
 pub fn restore_selection(
-    catalog: Catalog,
+    catalog: &Catalog,
     load: SettingsLoad<'_>,
 ) -> (usize, Option<SettingsFallback>) {
     match load {

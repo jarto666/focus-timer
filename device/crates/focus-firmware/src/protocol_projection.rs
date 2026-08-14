@@ -21,7 +21,19 @@ pub enum ProjectionError {
 ///
 /// Rejects values that cannot be represented by the protocol's explicit
 /// duration and text limits.
-pub fn status_response(status: DeviceStatus) -> Result<StatusResponse, ProjectionError> {
+pub fn status_response(status: &DeviceStatus) -> Result<StatusResponse, ProjectionError> {
+    status_response_with_order(status, None)
+}
+
+/// Projects a status snapshot with optional live-stream ordering metadata.
+///
+/// # Errors
+///
+/// Rejects values that exceed explicit protocol duration or text bounds.
+pub fn status_response_with_order(
+    status: &DeviceStatus,
+    ordering: Option<([u8; 8], u64)>,
+) -> Result<StatusResponse, ProjectionError> {
     Ok(StatusResponse {
         view_state: match status.view_state {
             focus_core::ViewState::Idle => ProtocolViewState::Idle,
@@ -31,7 +43,7 @@ pub fn status_response(status: DeviceStatus) -> Result<StatusResponse, Projectio
         },
         preset: protocol_preset(
             status.preset.id.as_str(),
-            status.preset.name,
+            status.preset.name.as_str(),
             status.preset.duration_ms,
         )?,
         remaining_duration_ms: duration(status.remaining_duration_ms)?,
@@ -42,6 +54,8 @@ pub fn status_response(status: DeviceStatus) -> Result<StatusResponse, Projectio
             health: journal_health(status.journal.health),
         },
         clock_known: status.clock_known,
+        status_epoch: ordering.map(|(epoch, _)| epoch),
+        status_revision: ordering.map(|(_, revision)| revision),
     })
 }
 

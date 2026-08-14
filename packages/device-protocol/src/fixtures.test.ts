@@ -4,23 +4,29 @@ import fixtureRegistry from '../../../protocol/fixtures/logical-v1.txt?raw';
 
 import {
   Capability,
+  CatalogResult,
   JournalHealth,
   ProtocolErrorCode,
   SessionOutcome,
   ViewState,
   decodeRequest,
   decodeResponse,
+  decodeEvent,
+  encodeEvent,
   encodeRequest,
   encodeResponse,
-  protocolVersion,
   type Request,
   type RequestEnvelope,
   type Response,
   type ResponseEnvelope,
+  type DeviceEvent,
+  type EventEnvelope,
   type SessionRecord,
 } from './index';
 
-const fixture = (name: string, expectedDirection: 'request' | 'response'): Uint8Array => {
+const protocolV1 = { major: 1, minor: 0 } as const;
+
+const fixture = (name: string, expectedDirection: 'request' | 'response' | 'event'): Uint8Array => {
   const line = fixtureRegistry
     .split('\n')
     .find((candidate) => !candidate.startsWith('#') && candidate.split(/\s+/u)[0] === name);
@@ -37,14 +43,21 @@ const fixture = (name: string, expectedDirection: 'request' | 'response'): Uint8
   );
 };
 
+const assertEvent = (name: string, event: DeviceEvent): void => {
+  const expected: EventEnvelope = { version: { major: 1, minor: 1 }, event };
+  const bytes = fixture(name, 'event');
+  expect(encodeEvent(expected)).toEqual(bytes);
+  expect(decodeEvent(bytes)).toEqual(expected);
+};
+
 const requestEnvelope = (requestId: number, request: Request): RequestEnvelope => ({
-  version: protocolVersion,
+  version: protocolV1,
   requestId,
   request,
 });
 
 const responseEnvelope = (requestId: number, response: Response): ResponseEnvelope => ({
-  version: protocolVersion,
+  version: protocolV1,
   requestId,
   response,
 });
@@ -105,7 +118,7 @@ describe('shared protocol 1.0 golden fixtures', () => {
           deviceId: Uint8Array.from({ length: 16 }, (_, index) => index),
           productName: 'Focus Timer',
           firmwareVersion: '0.1.0',
-          supportedVersion: protocolVersion,
+          supportedVersion: protocolV1,
           capabilities: [
             Capability.ReadStatus,
             Capability.ReadSessionPages,
@@ -196,7 +209,7 @@ describe('shared protocol 1.0 golden fixtures', () => {
         error: {
           code: ProtocolErrorCode.UnsupportedProtocolVersion,
           failedMessageKind: 1,
-          supportedVersion: protocolVersion,
+          supportedVersion: protocolV1,
         },
       }),
     );
@@ -211,5 +224,72 @@ describe('shared protocol 1.0 golden fixtures', () => {
         },
       }),
     );
+  });
+});
+
+describe('shared protocol 1.1 golden fixtures', () => {
+  const protocolV1_1 = { major: 1, minor: 1 } as const;
+
+  it('gates catalog requests and staged response', () => {
+    const request = {
+      version: protocolV1_1,
+      requestId: 11,
+      request: { type: 'getPresetCatalog' as const },
+    };
+    const requestBytes = fixture('catalog-request-v11', 'request');
+    expect(encodeRequest(request)).toEqual(requestBytes);
+    expect(decodeRequest(requestBytes)).toEqual(request);
+
+    const proposal = {
+      version: protocolV1_1,
+      requestId: 12,
+      request: {
+        type: 'proposePresetCatalog' as const,
+        proposal: {
+          expectedRevision: 7,
+          proposalId: 99,
+          customEntries: [{ id: 'writing', name: 'Writing', plannedDurationMs: 2_700_000 }],
+        },
+      },
+    };
+    const proposalBytes = fixture('catalog-proposal-v11', 'request');
+    expect(encodeRequest(proposal)).toEqual(proposalBytes);
+    expect(decodeRequest(proposalBytes)).toEqual(proposal);
+
+    const response = {
+      version: protocolV1_1,
+      requestId: 12,
+      response: {
+        type: 'proposePresetCatalog' as const,
+        proposal: { proposalId: 99, expiresInMs: 15_000 },
+      },
+    };
+    const responseBytes = fixture('catalog-staged-v11', 'response');
+    expect(encodeResponse(response)).toEqual(responseBytes);
+    expect(decodeResponse(responseBytes)).toEqual(response);
+  });
+
+  it('gates live status and catalog result events', () => {
+    assertEvent('live-status-v11', {
+      type: 'liveStatus',
+      status: {
+        viewState: ViewState.Running,
+        preset,
+        remainingDurationMs: 1_234_000,
+        journal: {
+          epoch: new Uint8Array(8).fill(0x33),
+          oldestSequence: 5,
+          latestSequence: 19,
+          health: JournalHealth.Healthy,
+        },
+        clockKnown: true,
+        statusEpoch: new Uint8Array(8).fill(0x55),
+        statusRevision: 41,
+      },
+    });
+    assertEvent('catalog-result-v11', {
+      type: 'presetCatalogResult',
+      result: { proposalId: 99, result: CatalogResult.Committed, catalogRevision: 8 },
+    });
   });
 });

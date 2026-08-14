@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   Capability,
+  CatalogResult,
   JournalHealth,
   MAX_LOGICAL_MESSAGE_BYTES,
   MAX_RECORDS_PER_PAGE,
@@ -11,10 +12,14 @@ import {
   ViewState,
   decodeRequest,
   decodeResponse,
+  decodeEvent,
+  encodeEvent,
   encodeRequest,
   encodeResponse,
   protocolVersion,
   type PresetSnapshot,
+  type DeviceEvent,
+  type EventEnvelope,
   type DecodeErrorCode,
   type ProtocolDecodeError,
   type Request,
@@ -52,6 +57,23 @@ const roundTripResponse = (response: Response): void => {
   expect(decodeResponse(encodeResponse(expected))).toEqual(expected);
 };
 
+const roundTripEvent = (event: DeviceEvent): void => {
+  const expected: EventEnvelope = { version: protocolVersion, event };
+  expect(decodeEvent(encodeEvent(expected))).toEqual(expected);
+};
+
+const catalog = () => ({
+  revision: 7,
+  entries: [
+    { id: 'deep-work', name: 'Deep Work', plannedDurationMs: 5_400_000, builtIn: true },
+    { id: 'focus', name: 'Focus', plannedDurationMs: 3_000_000, builtIn: true },
+    { id: 'pomodoro', name: 'Pomodoro', plannedDurationMs: 1_500_000, builtIn: true },
+    { id: 'reading', name: 'Reading', plannedDurationMs: 2_700_000, builtIn: true },
+    { id: 'quick-sprint', name: 'Quick Sprint', plannedDurationMs: 900_000, builtIn: true },
+    { id: 'writing', name: 'Writing', plannedDurationMs: 2_700_000, builtIn: false },
+  ],
+});
+
 describe('canonical logical protocol codec', () => {
   it('round-trips every request message', () => {
     roundTripRequest({ type: 'hello' });
@@ -68,7 +90,49 @@ describe('canonical logical protocol codec', () => {
       type: 'setClockAnchor',
       anchor: { utcMs: 1_786_669_200_000 },
     });
+    roundTripRequest({ type: 'getPresetCatalog' });
+    roundTripRequest({
+      type: 'proposePresetCatalog',
+      proposal: {
+        expectedRevision: 7,
+        proposalId: 99,
+        customEntries: [{ id: 'writing', name: 'Writing', plannedDurationMs: 2_700_000 }],
+      },
+    });
     roundTripRequest({ type: 'unknown', messageKind: 200 });
+  });
+
+  it('round-trips catalogs, proposals, and unsolicited events', () => {
+    roundTripResponse({ type: 'presetCatalog', catalog: catalog() });
+    roundTripResponse({
+      type: 'proposePresetCatalog',
+      proposal: { proposalId: 99, expiresInMs: 15_000 },
+    });
+    roundTripEvent({
+      type: 'liveStatus',
+      status: {
+        viewState: ViewState.Running,
+        preset: preset(),
+        remainingDurationMs: 1_234_000,
+        journal: {
+          epoch: new Uint8Array(8).fill(0x33),
+          oldestSequence: 5,
+          latestSequence: 19,
+          health: JournalHealth.Healthy,
+        },
+        clockKnown: true,
+        statusEpoch: new Uint8Array(8).fill(0x55),
+        statusRevision: 41,
+      },
+    });
+    roundTripEvent({
+      type: 'presetCatalogResult',
+      result: { proposalId: 99, result: CatalogResult.Committed, catalogRevision: 8 },
+    });
+    roundTripEvent({
+      type: 'presetCatalogResult',
+      result: { proposalId: 100, result: CatalogResult.Rejected },
+    });
   });
 
   it('round-trips hello, status, page, clock, and structured errors', () => {
@@ -165,7 +229,13 @@ describe('canonical logical protocol codec', () => {
 
   it('emits the registry canonical bytes for hello', () => {
     expect(
-      Array.from(encodeRequest({ ...requestEnvelope({ type: 'hello' }), requestId: 7 })),
+      Array.from(
+        encodeRequest({
+          ...requestEnvelope({ type: 'hello' }),
+          version: { major: 1, minor: 0 },
+          requestId: 7,
+        }),
+      ),
     ).toEqual([0xa5, 0x00, 0x01, 0x01, 0x00, 0x02, 0x07, 0x03, 0x01, 0x04, 0xa0]);
   });
 
@@ -179,7 +249,7 @@ describe('canonical logical protocol codec', () => {
       endedAtUtcMs: Number.MAX_SAFE_INTEGER,
     }));
     const envelope: ResponseEnvelope = {
-      version: protocolVersion,
+      version: { major: 1, minor: 0 },
       requestId: 0xffff_ffff,
       response: {
         type: 'sessionPage',
@@ -210,6 +280,38 @@ describe('canonical logical protocol codec', () => {
     expect(() =>
       encodeRequest({ ...requestEnvelope({ type: 'hello' }), requestId: 0 }),
     ).toThrowError(ProtocolEncodeError);
+
+    expect(() =>
+      encodeRequest(
+        requestEnvelope({
+          type: 'proposePresetCatalog',
+          proposal: {
+            expectedRevision: 0,
+            proposalId: 1,
+            customEntries: [{ id: 'bad', name: 'Bad', plannedDurationMs: 60_001 }],
+          },
+        }),
+      ),
+    ).toThrowError(expect.objectContaining({ field: 'plannedDurationMs' }));
+
+    expect(() =>
+      encodeEvent({
+        version: protocolVersion,
+        event: {
+          type: 'liveStatus',
+          status: {
+            viewState: ViewState.Idle,
+            preset: preset(),
+            remainingDurationMs: 1_500_000,
+            journal: {
+              epoch: new Uint8Array(8),
+              health: JournalHealth.Healthy,
+            },
+            clockKnown: false,
+          },
+        },
+      }),
+    ).toThrowError(expect.objectContaining({ field: 'statusEpoch' }));
   });
 
   it('rejects non-canonical, duplicate, forbidden, and trailing values', () => {
@@ -231,7 +333,7 @@ describe('canonical logical protocol codec', () => {
       Uint8Array.from([0xa6, 0, 1, 1, 0, 2, 1, 3, 1, 4, 0xa0, 5, 0xf5]),
     );
     expect(decoded).toEqual({
-      version: protocolVersion,
+      version: { major: 1, minor: 0 },
       requestId: 1,
       request: { type: 'hello' },
     });

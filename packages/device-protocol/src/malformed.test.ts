@@ -44,7 +44,7 @@ describe('bounded malformed-input recovery', () => {
       expect(() => decodeRequest(hello.subarray(0, length))).toThrow();
     }
     expect(decodeRequest(hello)).toEqual({
-      version: protocolVersion,
+      version: { major: 1, minor: 0 },
       requestId: 1,
       request: { type: 'hello' },
     });
@@ -64,7 +64,7 @@ describe('bounded malformed-input recovery', () => {
 
   it('preserves unknown requests and incompatible versions for bounded handler errors', () => {
     expect(decodeRequest(Uint8Array.from([0xa5, 0, 1, 1, 0, 2, 1, 3, 9, 4, 0xa0]))).toEqual({
-      version: protocolVersion,
+      version: { major: 1, minor: 0 },
       requestId: 1,
       request: { type: 'unknown', messageKind: 9 },
     });

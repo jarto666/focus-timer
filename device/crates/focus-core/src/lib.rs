@@ -8,14 +8,21 @@
 
 mod app;
 mod catalog;
+mod catalog_update;
 mod settings;
 
 pub use app::{
-    App, AppSnapshot, Diagnostic, Effects, FeedbackPattern, InputEvent, SessionOutcome,
-    SessionOutcomeKind, SessionState, ViewState,
+    App, AppSnapshot, CatalogReplaceError, Diagnostic, Effects, FeedbackPattern, InputEvent,
+    SessionOutcome, SessionOutcomeKind, SessionState, ViewState,
 };
 pub use catalog::{
-    Catalog, CatalogError, DEFAULT_PRESETS, MAX_SESSION_DURATION_MS, Preset, PresetId,
+    BUILT_IN_PRESET_COUNT, Catalog, CatalogError, MAX_CATALOG_PRESETS, MAX_CUSTOM_DURATION_MS,
+    MAX_CUSTOM_PRESETS, MAX_PRESET_ID_BYTES, MAX_PRESET_NAME_BYTES, MAX_SESSION_DURATION_MS,
+    MIN_CUSTOM_DURATION_MS, Preset, PresetId, default_catalog, default_presets,
+};
+pub use catalog_update::{
+    CATALOG_CONFIRMATION_TIMEOUT_MS, CatalogCommit, CatalogConfirmationAction, CatalogStageError,
+    CatalogStageOutcome, CatalogUpdateCoordinator,
 };
 pub use settings::{
     SETTINGS_SCHEMA_VERSION, SettingsFallback, SettingsLoad, SettingsRecord, restore_selection,

@@ -15,6 +15,7 @@ use focus_protocol::{
 const SERVICE_UUID: BleUuid = uuid128!("1cf47046-2e37-4642-a30e-df24879f994f");
 const COMMAND_UUID: BleUuid = uuid128!("65ecdf0d-cde0-4543-a62b-c166c3341319");
 const RESPONSE_UUID: BleUuid = uuid128!("2c4e304b-2581-481a-8646-89122d760711");
+const EVENT_UUID: BleUuid = uuid128!("7b6786bb-0304-4fc2-87a8-a9e8e4c4f13b");
 const PREFERRED_ATT_MTU: u16 = 185;
 const MAX_GATT_VALUE_BYTES: usize = PREFERRED_ATT_MTU as usize - 3;
 
@@ -47,6 +48,7 @@ pub struct ConnectionSnapshot {
     pub generation: u32,
     pub connected: bool,
     pub subscribed: bool,
+    pub event_subscribed: bool,
     pub mtu: u16,
 }
 
@@ -98,6 +100,7 @@ struct Connection {
     handle: u16,
     mtu: u16,
     subscribed: bool,
+    event_subscribed: bool,
 }
 
 struct SharedState {
@@ -147,8 +150,12 @@ struct OutboundTransfer {
 pub struct BleRadio {
     shared: Arc<Mutex<SharedState>>,
     response: Arc<Mutex<BLECharacteristic>>,
+    event: Arc<Mutex<BLECharacteristic>>,
     outbound: Option<Box<OutboundTransfer>>,
+    event_outbound: Option<Box<OutboundTransfer>>,
+    next_event_transfer_id: u16,
     frame: [u8; MAX_GATT_VALUE_BYTES],
+    event_frame: [u8; MAX_GATT_VALUE_BYTES],
 }
 
 impl BleRadio {
@@ -173,6 +180,7 @@ impl BleRadio {
                 handle: connection.conn_handle(),
                 mtu: connection.mtu(),
                 subscribed: false,
+                event_subscribed: false,
             });
             state.reset_transfer();
             log::info!(
@@ -214,6 +222,28 @@ impl BleRadio {
                 }
                 log::info!(
                     "BLE response subscription: handle={} mtu={} enabled={}",
+                    connection.conn_handle(),
+                    connection.mtu(),
+                    subscription.contains(NimbleSub::NOTIFY)
+                );
+            });
+
+        let event = service
+            .lock()
+            .create_characteristic(EVENT_UUID, NimbleProperties::NOTIFY);
+        let event_subscribe_shared = shared.clone();
+        event
+            .lock()
+            .on_subscribe(move |_, connection, subscription| {
+                let mut state = event_subscribe_shared.lock();
+                if let Some(active) = state.connection.as_mut()
+                    && active.handle == connection.conn_handle()
+                {
+                    active.mtu = connection.mtu();
+                    active.event_subscribed = subscription.contains(NimbleSub::NOTIFY);
+                }
+                log::info!(
+                    "BLE event subscription: handle={} mtu={} enabled={}",
                     connection.conn_handle(),
                     connection.mtu(),
                     subscription.contains(NimbleSub::NOTIFY)
@@ -308,8 +338,12 @@ impl BleRadio {
         Ok(Self {
             shared,
             response,
+            event,
             outbound: None,
+            event_outbound: None,
+            next_event_transfer_id: 1,
             frame: [0; MAX_GATT_VALUE_BYTES],
+            event_frame: [0; MAX_GATT_VALUE_BYTES],
         })
     }
 
@@ -321,6 +355,7 @@ impl BleRadio {
             generation: state.generation,
             connected: connection.is_some(),
             subscribed: connection.is_some_and(|active| active.subscribed),
+            event_subscribed: connection.is_some_and(|active| active.event_subscribed),
             mtu: connection.map_or(23, |active| active.mtu),
         }
     }
@@ -376,6 +411,35 @@ impl BleRadio {
         Ok(())
     }
 
+    /// Replaces any unsent live event with the newest complete snapshot.
+    /// Responses retain their independent, request-correlated outbox.
+    pub fn queue_latest_event(&mut self, message: &[u8]) -> Result<(), QueueError> {
+        let state = self.shared.lock();
+        let connection = state.connection.ok_or(QueueError::Disconnected)?;
+        if !connection.event_subscribed {
+            return Err(QueueError::NotSubscribed);
+        }
+        let frame_bytes = usize::from(connection.mtu.saturating_sub(3)).min(MAX_GATT_VALUE_BYTES);
+        let transfer_id = self.next_event_transfer_id;
+        let fragments = OwnedFragmenter::new(message, transfer_id, frame_bytes)
+            .map_err(QueueError::Fragment)?;
+        self.event_outbound = Some(Box::new(OutboundTransfer {
+            connection_generation: state.generation,
+            connection_handle: connection.handle,
+            fragments,
+            logical_bytes: message.len(),
+            frames_sent: 0,
+            started_at: Instant::now(),
+        }));
+        self.next_event_transfer_id = self.next_event_transfer_id.wrapping_add(1).max(1);
+        Ok(())
+    }
+
+    #[must_use]
+    pub fn event_outbound_busy(&self) -> bool {
+        self.event_outbound.is_some()
+    }
+
     /// Emits at most one notification. A failed or stale transfer is discarded;
     /// the client may safely retry the read-only logical request.
     pub fn poll_notification(&mut self) -> Result<NotificationProgress, NotificationError> {
@@ -428,6 +492,58 @@ impl BleRadio {
             );
             self.outbound = None;
             self.shared.lock().outbound_busy = false;
+            Ok(NotificationProgress::Complete)
+        } else {
+            Ok(NotificationProgress::Sent)
+        }
+    }
+
+    /// Emits at most one frame from the independent notify-only event stream.
+    pub fn poll_event_notification(&mut self) -> Result<NotificationProgress, NotificationError> {
+        if self.event_outbound.is_none() {
+            return Ok(NotificationProgress::Idle);
+        }
+        let snapshot = self.connection_snapshot();
+        let outbound = self
+            .event_outbound
+            .as_mut()
+            .expect("event outbound presence was checked before connection snapshot");
+        if !snapshot.connected
+            || !snapshot.event_subscribed
+            || snapshot.generation != outbound.connection_generation
+        {
+            self.event_outbound = None;
+            return Ok(NotificationProgress::DroppedConnection);
+        }
+
+        let next_frame = match outbound.fragments.next_frame(&mut self.event_frame) {
+            Ok(next_frame) => next_frame,
+            Err(error) => {
+                self.event_outbound = None;
+                return Err(NotificationError::Fragment(error));
+            }
+        };
+        let Some(length) = next_frame else {
+            self.event_outbound = None;
+            return Ok(NotificationProgress::Complete);
+        };
+        if let Err(error) = self
+            .event
+            .lock()
+            .notify_with(&self.event_frame[..length], outbound.connection_handle)
+        {
+            self.event_outbound = None;
+            return Err(NotificationError::Notify(error));
+        }
+        outbound.frames_sent += 1;
+        if outbound.fragments.is_complete() {
+            log::debug!(
+                "BLE live event transfer: bytes={} frames={} elapsed_ms={}",
+                outbound.logical_bytes,
+                outbound.frames_sent,
+                outbound.started_at.elapsed().as_millis()
+            );
+            self.event_outbound = None;
             Ok(NotificationProgress::Complete)
         } else {
             Ok(NotificationProgress::Sent)

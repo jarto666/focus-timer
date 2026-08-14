@@ -2,12 +2,41 @@ import type { DeviceConnectionState } from '@focus-timer/device-client';
 import type { MockScenarioId } from '@focus-timer/mock-device';
 
 export type DeviceStatusModel = Readonly<{
+  presetId: string;
   presetName: string;
   plannedDurationMs: number;
   remainingDurationMs: number;
   viewState: 'idle' | 'running' | 'paused' | 'completed';
   clockKnown: boolean;
+  observedAtMs: number;
+  freshness: 'live' | 'stale';
 }>;
+
+export type PresetDraft = Readonly<{
+  id: string;
+  name: string;
+  plannedDurationMs: number;
+}>;
+
+export type PresetCatalogModel = Readonly<{
+  revision: number;
+  baseRevision: number;
+  builtIns: readonly PresetDraft[];
+  committedCustom: readonly PresetDraft[];
+  draft: readonly PresetDraft[];
+}>;
+
+export type PresetSyncState =
+  | 'unavailable'
+  | 'loading'
+  | 'synchronized'
+  | 'unsynchronized'
+  | 'awaiting-confirmation'
+  | 'busy'
+  | 'conflict'
+  | 'expired'
+  | 'rejected'
+  | 'storage-failed';
 
 export type LocalHistoryEntry = Readonly<{
   key: string;
@@ -48,10 +77,14 @@ export type CompanionRuntime = Readonly<{
   status: DeviceStatusModel | null;
   history: LocalHistoryModel;
   historySync: HistorySyncState;
+  presetCatalog: PresetCatalogModel | null;
+  presetSync: PresetSyncState;
   selectedScenario: MockScenarioId;
   developmentScenarios: readonly DevelopmentScenarioOption[];
   startScan(): Promise<void>;
   connect(transportId: string): Promise<void>;
   disconnect(): Promise<void>;
+  updatePresetDraft(entries: readonly PresetDraft[]): Promise<void>;
+  submitPresetDraft(): Promise<void>;
   selectScenario(scenario: MockScenarioId): void;
 }>;

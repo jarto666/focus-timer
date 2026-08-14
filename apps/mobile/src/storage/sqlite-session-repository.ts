@@ -9,10 +9,19 @@ import {
   type SessionRepository,
   type StoredSessionRecord,
 } from '@focus-timer/device-client';
-import { SessionOutcome, type SessionRecord } from '@focus-timer/device-protocol';
+import {
+  SessionOutcome,
+  type PresetSnapshot,
+  type SessionRecord,
+} from '@focus-timer/device-protocol';
 
 const DATABASE_NAME = 'muninn.sqlite';
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
+
+export type StoredPresetDraft = Readonly<{
+  baseRevision: number;
+  customEntries: readonly PresetSnapshot[];
+}>;
 
 type CursorRow = Readonly<{
   journal_epoch: string;
@@ -193,6 +202,40 @@ export class SqliteSessionRepository implements SessionRepository {
     );
     return rows.map(storedSessionFromRow);
   }
+
+  async loadPresetDraft(deviceId: string): Promise<StoredPresetDraft | null> {
+    const row = await this.database.getFirstAsync<{
+      base_revision: number;
+      custom_json: string;
+    }>(`SELECT base_revision, custom_json FROM preset_drafts WHERE device_id = ?`, deviceId);
+    if (row === null) return null;
+    const parsed: unknown = JSON.parse(row.custom_json);
+    if (!Array.isArray(parsed)) throw new Error('Stored preset draft is malformed');
+    return { baseRevision: row.base_revision, customEntries: parsed as PresetSnapshot[] };
+  }
+
+  async savePresetDraft(
+    deviceId: string,
+    baseRevision: number,
+    customEntries: readonly PresetSnapshot[],
+  ): Promise<void> {
+    await this.database.runAsync(
+      `INSERT INTO preset_drafts (device_id, base_revision, custom_json, updated_at_ms)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(device_id) DO UPDATE SET
+         base_revision = excluded.base_revision,
+         custom_json = excluded.custom_json,
+         updated_at_ms = excluded.updated_at_ms`,
+      deviceId,
+      baseRevision,
+      JSON.stringify(customEntries),
+      this.now(),
+    );
+  }
+
+  async clearPresetDraft(deviceId: string): Promise<void> {
+    await this.database.runAsync(`DELETE FROM preset_drafts WHERE device_id = ?`, deviceId);
+  }
 }
 
 let repositoryPromise: Promise<SqliteSessionRepository> | null = null;
@@ -214,8 +257,10 @@ export async function migrate(database: SQLiteDatabase): Promise<void> {
   }
   if ((version?.user_version ?? 0) === SCHEMA_VERSION) return;
 
+  const currentVersion = version?.user_version ?? 0;
   await database.withExclusiveTransactionAsync(async (transaction) => {
-    await transaction.execAsync(`
+    if (currentVersion < 1) {
+      await transaction.execAsync(`
       CREATE TABLE IF NOT EXISTS known_devices (
         device_id TEXT PRIMARY KEY NOT NULL,
         transport_id TEXT NOT NULL,
@@ -262,8 +307,20 @@ export async function migrate(database: SQLiteDatabase): Promise<void> {
       CREATE INDEX IF NOT EXISTS session_records_history
         ON session_records(device_id, ended_at_utc_ms DESC, sequence DESC);
 
-      PRAGMA user_version = 1;
     `);
+    }
+    if (currentVersion < 2) {
+      await transaction.execAsync(`
+        CREATE TABLE IF NOT EXISTS preset_drafts (
+          device_id TEXT PRIMARY KEY NOT NULL,
+          base_revision INTEGER NOT NULL CHECK(base_revision >= 0),
+          custom_json TEXT NOT NULL,
+          updated_at_ms INTEGER NOT NULL,
+          FOREIGN KEY (device_id) REFERENCES known_devices(device_id) ON DELETE CASCADE
+        );
+      `);
+    }
+    await transaction.execAsync(`PRAGMA user_version = ${SCHEMA_VERSION};`);
   });
 }
 

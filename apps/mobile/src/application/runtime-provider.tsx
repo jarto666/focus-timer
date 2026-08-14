@@ -15,17 +15,21 @@ import {
   runProtocolFaultAcceptance,
   synchronizeForeground,
   type DeviceCandidate,
+  type DeviceClient,
   type DeviceConnectionState,
   type DeviceTransport,
   type DeviceTransportAvailability,
   type ReadyDevice,
 } from '@focus-timer/device-client';
 import {
+  Capability,
+  CatalogResult,
   MAX_RECORDS_PER_PAGE,
   PROTOCOL_MAJOR,
   PROTOCOL_MINOR,
   SessionOutcome,
   ViewState,
+  ProtocolErrorCode,
   encodeRequest,
 } from '@focus-timer/device-protocol';
 import {
@@ -48,6 +52,7 @@ import {
   type DeviceStatusModel,
   type LocalHistoryModel,
   emptyHistory,
+  type PresetDraft,
 } from './companion-model';
 
 type AppBackend = Readonly<{
@@ -121,7 +126,10 @@ function readyDevice(device: Awaited<ReturnType<SqliteSessionRepository['loadMos
   } satisfies ReadyDevice;
 }
 
-function statusModel(status: Awaited<ReturnType<typeof synchronizeForeground>>['status']) {
+function statusModel(
+  status: Awaited<ReturnType<typeof synchronizeForeground>>['status'],
+  freshness: DeviceStatusModel['freshness'] = 'live',
+) {
   const states: Record<ViewState, DeviceStatusModel['viewState']> = {
     [ViewState.Idle]: 'idle',
     [ViewState.Running]: 'running',
@@ -129,12 +137,29 @@ function statusModel(status: Awaited<ReturnType<typeof synchronizeForeground>>['
     [ViewState.Completed]: 'completed',
   };
   return {
+    presetId: status.preset.id,
     presetName: status.preset.name,
     plannedDurationMs: status.preset.plannedDurationMs,
     remainingDurationMs: status.remainingDurationMs,
     viewState: states[status.viewState],
     clockKnown: status.clockKnown,
+    observedAtMs: Date.now(),
+    freshness,
   } satisfies DeviceStatusModel;
+}
+
+function catalogModel(
+  catalog: Awaited<ReturnType<DeviceClient['getPresetCatalog']>>,
+  draft: readonly PresetDraft[],
+  baseRevision = catalog.revision,
+) {
+  return {
+    revision: catalog.revision,
+    baseRevision,
+    builtIns: catalog.entries.filter((entry) => entry.builtIn),
+    committedCustom: catalog.entries.filter((entry) => !entry.builtIn),
+    draft,
+  };
 }
 
 async function loadHistory(
@@ -172,12 +197,17 @@ export function RuntimeProvider({ children }: PropsWithChildren) {
   const [historySync, setHistorySync] = useState<CompanionRuntime['historySync']>({
     phase: 'loading',
   });
+  const [presetCatalog, setPresetCatalog] = useState<CompanionRuntime['presetCatalog']>(null);
+  const [presetSync, setPresetSync] = useState<CompanionRuntime['presetSync']>('unavailable');
   const repository = useRef<SqliteSessionRepository | null>(null);
   const currentDevice = useRef<ReadyDevice | null>(null);
   const candidates = useRef(new Map<string, DeviceCandidate>());
   const automaticReconnectAttempt = useRef<string | null>(null);
   const physicalAcceptanceRun = useRef(false);
   const latestAvailability = useRef<DeviceTransportAvailability>({ status: 'available' });
+  const deviceClient = useRef<DeviceClient | null>(null);
+  const unsubscribeEvents = useRef<(() => void) | null>(null);
+  const recoveryInFlight = useRef(false);
 
   useEffect(() => {
     let active = true;
@@ -208,10 +238,14 @@ export function RuntimeProvider({ children }: PropsWithChildren) {
 
   useEffect(() => {
     return backend.transport.subscribeToDisconnect(() => {
+      unsubscribeEvents.current?.();
+      unsubscribeEvents.current = null;
+      deviceClient.current = null;
+      setStatus((current) => (current === null ? null : { ...current, freshness: 'stale' }));
+      setPresetSync((current) => (current === 'synchronized' ? 'unavailable' : current));
       const availability = latestAvailability.current;
       if (availability.status === 'unavailable') {
         setConnection({ phase: 'unavailable', reason: availability.reason });
-        setStatus(null);
         return;
       }
       if (availability.status === 'permission-denied') {
@@ -219,7 +253,6 @@ export function RuntimeProvider({ children }: PropsWithChildren) {
           phase: 'permission-denied',
           canOpenSettings: availability.canOpenSettings,
         });
-        setStatus(null);
         return;
       }
       setConnection({
@@ -227,9 +260,17 @@ export function RuntimeProvider({ children }: PropsWithChildren) {
         reason: 'link-loss',
         lastDevice: currentDevice.current,
       });
-      setStatus(null);
     });
   }, [backend]);
+
+  useEffect(
+    () => () => {
+      unsubscribeEvents.current?.();
+      unsubscribeEvents.current = null;
+      deviceClient.current = null;
+    },
+    [backend],
+  );
 
   useEffect(() => {
     return backend.transport.subscribeToAvailability((availability) => {
@@ -249,7 +290,7 @@ export function RuntimeProvider({ children }: PropsWithChildren) {
         return;
       }
 
-      setStatus(null);
+      setStatus((current) => (current === null ? null : { ...current, freshness: 'stale' }));
       if (availability.status === 'unavailable') {
         setConnection({ phase: 'unavailable', reason: availability.reason });
       } else {
@@ -329,8 +370,84 @@ export function RuntimeProvider({ children }: PropsWithChildren) {
         );
         const device = readyDevice(result.device)!;
         currentDevice.current = device;
+        deviceClient.current = result.client;
+        unsubscribeEvents.current?.();
+        const refreshStatus = () => {
+          if (recoveryInFlight.current) return;
+          recoveryInFlight.current = true;
+          void result.client
+            .getStatus(operation)
+            .then((latest) => setStatus(statusModel(latest)))
+            .catch(() =>
+              setStatus((current) =>
+                current === null ? null : { ...current, freshness: 'stale' },
+              ),
+            )
+            .finally(() => {
+              recoveryInFlight.current = false;
+            });
+        };
+        if (result.client.hello?.capabilities.includes(Capability.LiveStatus) === true) {
+          unsubscribeEvents.current = result.client.subscribeToEvents((event) => {
+            if (event.type === 'liveStatus') {
+              setStatus(statusModel(event.status));
+              return;
+            }
+            const catalogResult = event.result;
+            switch (catalogResult.result) {
+              case CatalogResult.Committed:
+                setPresetSync('loading');
+                void result.client
+                  .getPresetCatalog(operation)
+                  .then(async (catalog) => {
+                    await repository.current?.clearPresetDraft(result.deviceId);
+                    setPresetCatalog(
+                      catalogModel(
+                        catalog,
+                        catalog.entries.filter((entry) => !entry.builtIn),
+                      ),
+                    );
+                    setPresetSync('synchronized');
+                  })
+                  .catch(() => setPresetSync('unavailable'));
+                break;
+              case CatalogResult.Rejected:
+                setPresetSync('rejected');
+                break;
+              case CatalogResult.Expired:
+                setPresetSync('expired');
+                break;
+              case CatalogResult.Cancelled:
+                setPresetSync('unsynchronized');
+                break;
+              case CatalogResult.StorageFailed:
+                setPresetSync('storage-failed');
+                break;
+            }
+          }, refreshStatus);
+          // Subscription is active before this recovery read, closing the startup race.
+          setStatus(statusModel(await result.client.getStatus(operation)));
+        } else {
+          unsubscribeEvents.current = null;
+          setStatus(statusModel(result.status));
+        }
+        if (result.client.hello?.capabilities.includes(Capability.ReadPresetCatalog) === true) {
+          setPresetSync('loading');
+          const catalog = await result.client.getPresetCatalog(operation);
+          const storedDraft = await repository.current.loadPresetDraft(result.deviceId);
+          const committedCustom = catalog.entries.filter((entry) => !entry.builtIn);
+          const draft = storedDraft?.customEntries ?? committedCustom;
+          setPresetCatalog(catalogModel(catalog, draft, storedDraft?.baseRevision));
+          setPresetSync(
+            JSON.stringify(draft) === JSON.stringify(committedCustom)
+              ? 'synchronized'
+              : 'unsynchronized',
+          );
+        } else {
+          setPresetCatalog(null);
+          setPresetSync('unavailable');
+        }
         setConnection({ phase: 'ready', device });
-        setStatus(statusModel(result.status));
         setHistory(await loadHistory(repository.current, result.deviceId));
         setHistorySync({ phase: 'ready' });
         if (
@@ -359,9 +476,13 @@ export function RuntimeProvider({ children }: PropsWithChildren) {
             reason: 'link-loss',
             lastDevice: currentDevice.current,
           });
-          setStatus(null);
+          setStatus((current) => (current === null ? null : { ...current, freshness: 'stale' }));
         }
       } catch (error) {
+        unsubscribeEvents.current?.();
+        unsubscribeEvents.current = null;
+        deviceClient.current = null;
+        setStatus((current) => (current === null ? null : { ...current, freshness: 'stale' }));
         if (error instanceof DeviceClientError && error.code === 'incompatible') {
           await backend.transport.disconnect();
           setConnection({
@@ -402,13 +523,17 @@ export function RuntimeProvider({ children }: PropsWithChildren) {
 
   const disconnect = useCallback(async () => {
     try {
+      unsubscribeEvents.current?.();
+      unsubscribeEvents.current = null;
+      deviceClient.current = null;
       await backend.transport.disconnect();
       setConnection({
         phase: 'disconnected',
         reason: 'user',
         lastDevice: currentDevice.current,
       });
-      setStatus(null);
+      setStatus((current) => (current === null ? null : { ...current, freshness: 'stale' }));
+      setPresetSync((current) => (current === 'synchronized' ? 'unavailable' : current));
     } catch (error) {
       setConnection(retryableState(error, 'disconnect', null));
     }
@@ -419,10 +544,72 @@ export function RuntimeProvider({ children }: PropsWithChildren) {
     const nextBackend = createBackend(scenarioId);
     setSelectedScenario(scenarioId);
     setBackend(nextBackend);
+    unsubscribeEvents.current?.();
+    unsubscribeEvents.current = null;
+    deviceClient.current = null;
     candidates.current.clear();
     setConnection(initialConnection());
     setStatus(null);
+    setPresetCatalog(null);
+    setPresetSync('unavailable');
   }, []);
+
+  const updatePresetDraft = useCallback(
+    async (entries: readonly PresetDraft[]) => {
+      const device = currentDevice.current;
+      const store = repository.current;
+      if (device === null || store === null || presetCatalog === null) return;
+      await store.savePresetDraft(device.deviceId, presetCatalog.baseRevision, entries);
+      setPresetCatalog({ ...presetCatalog, draft: entries });
+      setPresetSync(
+        JSON.stringify(entries) === JSON.stringify(presetCatalog.committedCustom)
+          ? 'synchronized'
+          : 'unsynchronized',
+      );
+    },
+    [presetCatalog],
+  );
+
+  const submitPresetDraft = useCallback(async () => {
+    const client = deviceClient.current;
+    const device = currentDevice.current;
+    const store = repository.current;
+    if (client === null || device === null || store === null || presetCatalog === null) {
+      setPresetSync('unavailable');
+      return;
+    }
+    setPresetSync('awaiting-confirmation');
+    try {
+      const proposalId = (Date.now() % 0xffff_fffe) + 1;
+      await client.proposePresetCatalog(
+        {
+          expectedRevision: presetCatalog.baseRevision,
+          proposalId,
+          customEntries: presetCatalog.draft,
+        },
+        operation,
+      );
+      if (backend.transport.kind === 'mock') {
+        const catalog = await client.getPresetCatalog(operation);
+        await store.clearPresetDraft(device.deviceId);
+        const committed = catalog.entries.filter((entry) => !entry.builtIn);
+        setPresetCatalog(catalogModel(catalog, committed));
+        setPresetSync('synchronized');
+      }
+    } catch (error) {
+      if (error instanceof DeviceClientError && error.code === 'remote-error') {
+        if (error.details.protocolErrorCode === ProtocolErrorCode.Busy) {
+          setPresetSync('busy');
+          return;
+        }
+        if (error.details.protocolErrorCode === ProtocolErrorCode.CatalogConflict) {
+          setPresetSync('conflict');
+          return;
+        }
+      }
+      setPresetSync('unavailable');
+    }
+  }, [backend.transport.kind, presetCatalog]);
 
   const value = useMemo<CompanionRuntime>(
     () => ({
@@ -430,11 +617,15 @@ export function RuntimeProvider({ children }: PropsWithChildren) {
       status,
       history,
       historySync,
+      presetCatalog,
+      presetSync,
       selectedScenario,
       developmentScenarios: runtimeConfig.deviceBackend === 'mock' ? developmentScenarios : [],
       startScan,
       connect,
       disconnect,
+      updatePresetDraft,
+      submitPresetDraft,
       selectScenario,
     }),
     [
@@ -443,10 +634,14 @@ export function RuntimeProvider({ children }: PropsWithChildren) {
       disconnect,
       history,
       historySync,
+      presetCatalog,
+      presetSync,
       selectScenario,
       selectedScenario,
       startScan,
       status,
+      submitPresetDraft,
+      updatePresetDraft,
     ],
   );
 

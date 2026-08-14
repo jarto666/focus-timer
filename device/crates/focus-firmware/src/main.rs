@@ -10,6 +10,8 @@ mod diagnostics;
 ))]
 mod nvs_journal;
 #[cfg(not(feature = "diagnostic-firmware"))]
+mod nvs_presets;
+#[cfg(not(feature = "diagnostic-firmware"))]
 mod nvs_settings;
 #[cfg(not(feature = "diagnostic-firmware"))]
 mod runtime;

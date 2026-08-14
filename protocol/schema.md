@@ -1,7 +1,7 @@
 # Focus Timer device synchronization protocol registry
 
-Status: **protocol 1.0 registry**  
-Wire encoding: **deterministic constrained CBOR**  
+Status: **protocol 1.1 registry**
+Wire encoding: **deterministic constrained CBOR**
 BLE frame version: **1**
 
 This file is the language-independent source of truth for the Focus Timer synchronization
@@ -22,6 +22,7 @@ All UUIDs below are private 128-bit UUIDs. They are not Bluetooth SIG-assigned i
 | Focus Timer service     | `1cf47046-2e37-4642-a30e-df24879f994f` | Primary service; included in advertising |
 | Command characteristic  | `65ecdf0d-cde0-4543-a62b-c166c3341319` | Write with response                      |
 | Response characteristic | `2c4e304b-2581-481a-8646-89122d760711` | Notify                                   |
+| Event characteristic    | `7b6786bb-0304-4fc2-87a8-a9e8e4c4f13b` | Notify                                   |
 
 The client must subscribe to the response characteristic before writing a command. The device
 accepts one connected central and one request awaiting a response. The advertising or scan-response
@@ -30,7 +31,7 @@ device identifier, journal epoch, session data, or hardware MAC address as produ
 
 ## 2. Compatibility policy
 
-The current protocol version is `1.0`.
+The current protocol version is `1.1`.
 
 - The **major** version changes when an existing identifier, field meaning, required field, value
   representation, or compatibility rule changes incompatibly.
@@ -78,10 +79,12 @@ not a conforming encoder.
 | Name                         |  Value | Meaning                                                |
 | ---------------------------- | -----: | ------------------------------------------------------ |
 | `PROTOCOL_MAJOR`             |    `1` | Current major version                                  |
-| `PROTOCOL_MINOR`             |    `0` | Current minor version                                  |
+| `PROTOCOL_MINOR`             |    `1` | Current minor version                                  |
 | `MAX_LOGICAL_MESSAGE_BYTES`  | `2048` | Complete CBOR envelope, before BLE framing             |
 | `MAX_RECORDS_PER_PAGE`       |    `8` | Requested and returned session records                 |
 | `MAX_CAPABILITIES`           |    `8` | Unique capability identifiers in hello                 |
+| `MAX_CUSTOM_PRESETS`         |    `8` | Mutable custom entries in one catalog                  |
+| `MAX_TOTAL_PRESETS`          |   `13` | Five built-ins followed by custom entries              |
 | `MAX_TEXT_BYTES`             |   `32` | Default text-string bound                              |
 | `MAX_PRODUCT_NAME_BYTES`     |   `24` | Hello product name                                     |
 | `MAX_FIRMWARE_VERSION_BYTES` |   `32` | Hello firmware version                                 |
@@ -94,7 +97,8 @@ not a conforming encoder.
 
 Scalar conventions:
 
-- `request_id` is an unsigned 32-bit integer in `1..=0xffff_ffff`. Zero is reserved.
+- `request_id` is an unsigned 32-bit integer in `1..=0xffff_ffff` for requests and responses.
+  Device event envelopes use exactly zero and no other envelope may use zero.
 - Durations are unsigned milliseconds in `0..=0xffff_ffff`.
 - Journal sequences are in `1..=9_007_199_254_740_991` (`Number.MAX_SAFE_INTEGER`). Zero is
   reserved as the cursor before the first sequence. A device must create a new journal epoch before
@@ -135,9 +139,15 @@ request timeout.
 |   `6` | `GetSessionPageResponse` | device → client | `ReadSessionPages`  |
 |   `7` | `SetClockAnchorRequest`  | client → device | `SetClockAnchor`    |
 |   `8` | `SetClockAnchorResponse` | device → client | `SetClockAnchor`    |
+|   `9` | `GetPresetCatalogRequest` | client → device | `ReadPresetCatalog` |
+|  `10` | `GetPresetCatalogResponse` | device → client | `ReadPresetCatalog` |
+|  `11` | `ProposePresetCatalogRequest` | client → device | `ProposePresetCatalog` |
+|  `12` | `ProposePresetCatalogResponse` | device → client | `ProposePresetCatalog` |
+|  `13` | `LiveStatusEvent` | device → client | `LiveStatus` |
+|  `14` | `PresetCatalogResultEvent` | device → client | `ProposePresetCatalog` |
 | `255` | `ErrorResponse`          | device → client | baseline            |
 
-`0`, `9..254`, and values above `255` are reserved for future registry revisions.
+`0`, `15..254`, and values above `255` are reserved for future registry revisions.
 
 ## 6. Shared nested registries
 
@@ -148,6 +158,9 @@ request timeout.
 | `1` | `ReadStatus`       | Read the current immutable timer projection |
 | `2` | `ReadSessionPages` | Read stateless bounded journal pages        |
 | `3` | `SetClockAnchor`   | Update the volatile UTC anchor only         |
+| `4` | `LiveStatus` | Subscribe to ordered full timer snapshots |
+| `5` | `ReadPresetCatalog` | Read the revisioned combined preset catalog |
+| `6` | `ProposePresetCatalog` | Stage a complete custom catalog for physical confirmation |
 
 ### Preset snapshot map
 
@@ -156,6 +169,25 @@ request timeout.
 | `0` | `preset_id`           | text | yes      | `1..MAX_PRESET_ID_BYTES`   |
 | `1` | `preset_name`         | text | yes      | `1..MAX_PRESET_NAME_BYTES` |
 | `2` | `planned_duration_ms` | uint | yes      | Duration bound             |
+
+### Catalog entry map
+
+| Key | Name                  | Type | Required | Rule                       |
+| --: | --------------------- | ---- | -------- | -------------------------- |
+| `0` | `preset_id`           | text | yes      | `1..MAX_PRESET_ID_BYTES`   |
+| `1` | `preset_name`         | text | yes      | `1..MAX_PRESET_NAME_BYTES` |
+| `2` | `planned_duration_ms` | uint | yes      | Duration bound             |
+| `3` | `built_in`            | bool | yes      | Immutable when true        |
+
+### Catalog-result enum
+
+| Value | Name            |
+| ----: | --------------- |
+|   `0` | `Committed`     |
+|   `1` | `Rejected`      |
+|   `2` | `Expired`       |
+|   `3` | `Cancelled`     |
+|   `4` | `StorageFailed` |
 
 ### Timer view-state enum
 
@@ -216,6 +248,8 @@ Payload: `{}`.
 | `2` | `remaining_duration_ms` | uint | Duration bound; zero when completed        |
 | `3` | `journal`               | map  | Journal status map below                   |
 | `4` | `clock_known`           | bool | Whether a valid volatile UTC anchor exists |
+| `5` | `status_epoch`          | bytes | Optional in 1.0; exactly 8 bytes in 1.1 live-status peers |
+| `6` | `status_revision`       | uint | Optional in 1.0; safe positive integer in 1.1 live-status peers |
 
 Journal status map:
 
@@ -277,6 +311,52 @@ Synchronization or receipt time must never be substituted for either field.
 | Key | Name     | Type | Rule                                                   |
 | --: | -------- | ---- | ------------------------------------------------------ |
 | `0` | `utc_ms` | uint | Current UTC milliseconds within the safe-integer bound |
+
+### `GetPresetCatalogRequest` (`9`)
+
+Payload: `{}`.
+
+### `GetPresetCatalogResponse` (`10`)
+
+| Key | Name       | Type       | Rule |
+| --: | ---------- | ---------- | ---- |
+| `0` | `revision` | uint       | Safe integer; zero means no custom catalog has committed |
+| `1` | `entries`  | array<map> | Five built-ins followed by at most eight custom catalog-entry maps |
+
+### `ProposePresetCatalogRequest` (`11`)
+
+| Key | Name                | Type       | Rule |
+| --: | ------------------- | ---------- | ---- |
+| `0` | `expected_revision` | uint       | Safe integer previously returned by a catalog read |
+| `1` | `proposal_id`       | uint       | Non-zero unsigned 32-bit client correlation value |
+| `2` | `custom_entries`    | array<map> | Zero to eight preset snapshot maps; complete desired custom list |
+
+Custom durations must be whole minutes from 60,000 through 43,200,000 milliseconds. Identifiers
+must not collide with each other or a built-in identifier. A successful response only stages the
+proposal; it does not claim persistence.
+
+### `ProposePresetCatalogResponse` (`12`)
+
+| Key | Name            | Type | Rule |
+| --: | --------------- | ---- | ---- |
+| `0` | `proposal_id`   | uint | Copies the non-zero proposal identifier |
+| `1` | `expires_in_ms` | uint | `15000` for the current confirmation contract |
+
+### `LiveStatusEvent` (`13`)
+
+The payload is the complete `GetStatusResponse` map including `status_epoch` and
+`status_revision`. Its event envelope uses `request_id = 0`.
+
+### `PresetCatalogResultEvent` (`14`)
+
+| Key | Name               | Type | Required | Rule |
+| --: | ------------------ | ---- | -------- | ---- |
+| `0` | `proposal_id`      | uint | yes      | Non-zero proposal identifier |
+| `1` | `result`           | uint | yes      | Catalog-result enum |
+| `2` | `catalog_revision` | uint | no       | Present only for `Committed` |
+
+The event envelope uses `request_id = 0`. Conflict and busy failures are correlated
+`ErrorResponse` values to the proposal request and therefore do not produce result events.
 
 On acceptance the device pairs this UTC value with its monotonic millisecond value at receipt. It
 does not persist the anchor across a cold boot and does not modify monotonic session accounting.

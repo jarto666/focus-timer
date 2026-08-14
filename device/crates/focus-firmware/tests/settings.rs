@@ -1,6 +1,6 @@
 use focus_core::{
-    App, Catalog, DEFAULT_PRESETS, Diagnostic, InputEvent, PresetId, SessionState,
-    SettingsFallback, SettingsLoad,
+    App, Catalog, Diagnostic, InputEvent, PresetId, SessionState, SettingsFallback, SettingsLoad,
+    default_catalog,
 };
 use focus_firmware::settings::{
     FlushError, FlushOutcome, LoadError, QueueOutcome, SAVE_QUIET_PERIOD_MS, SelectionPersistence,
@@ -54,7 +54,7 @@ impl SettingsStore for FakeStore {
 }
 
 fn catalog() -> Catalog {
-    Catalog::new(&DEFAULT_PRESETS, 2).expect("test catalog is valid")
+    default_catalog()
 }
 
 #[test]

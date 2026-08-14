@@ -1,6 +1,6 @@
 use std::{cell::Cell, collections::BTreeMap, rc::Rc, vec::Vec};
 
-use focus_core::{App, Catalog, DEFAULT_PRESETS, InputEvent, SettingsLoad};
+use focus_core::{App, InputEvent, SettingsLoad, default_catalog};
 use focus_firmware::journal_adapter::{
     FlushOutcome, ObserveError, ObserveOutcome, OutcomeJournalQueue,
 };
@@ -54,7 +54,7 @@ impl EntropySource for Entropy {
 }
 
 fn app() -> App {
-    let catalog = Catalog::new(&DEFAULT_PRESETS, 2).unwrap();
+    let catalog = default_catalog();
     App::boot(catalog, SettingsLoad::Missing).0
 }
 

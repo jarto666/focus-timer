@@ -1,10 +1,12 @@
 use heapless::{String, Vec};
 
 pub const PROTOCOL_MAJOR: u8 = 1;
-pub const PROTOCOL_MINOR: u8 = 0;
+pub const PROTOCOL_MINOR: u8 = 1;
 pub const MAX_LOGICAL_MESSAGE_BYTES: usize = 2_048;
 pub const MAX_RECORDS_PER_PAGE: usize = 8;
 pub const MAX_CAPABILITIES: usize = 8;
+pub const MAX_CUSTOM_PRESETS: usize = 8;
+pub const MAX_TOTAL_PRESETS: usize = 13;
 pub const MAX_PRODUCT_NAME_BYTES: usize = 24;
 pub const MAX_FIRMWARE_VERSION_BYTES: usize = 32;
 pub const MAX_PRESET_ID_BYTES: usize = 32;
@@ -13,6 +15,7 @@ pub const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 
 pub type DeviceId = [u8; 16];
 pub type JournalEpoch = [u8; 8];
+pub type StatusEpoch = [u8; 8];
 pub type ProductName = String<MAX_PRODUCT_NAME_BYTES>;
 pub type FirmwareVersion = String<MAX_FIRMWARE_VERSION_BYTES>;
 pub type PresetId = String<MAX_PRESET_ID_BYTES>;
@@ -37,6 +40,9 @@ pub enum Capability {
     ReadStatus = 1,
     ReadSessionPages = 2,
     SetClockAnchor = 3,
+    LiveStatus = 4,
+    ReadPresetCatalog = 5,
+    ProposePresetCatalog = 6,
 }
 
 impl Capability {
@@ -45,6 +51,9 @@ impl Capability {
             1 => Some(Self::ReadStatus),
             2 => Some(Self::ReadSessionPages),
             3 => Some(Self::SetClockAnchor),
+            4 => Some(Self::LiveStatus),
+            5 => Some(Self::ReadPresetCatalog),
+            6 => Some(Self::ProposePresetCatalog),
             _ => None,
         }
     }
@@ -120,6 +129,7 @@ pub enum ErrorCode {
     Busy = 8,
     JournalUnavailable = 9,
     InternalError = 10,
+    CatalogConflict = 11,
 }
 
 impl ErrorCode {
@@ -135,6 +145,7 @@ impl ErrorCode {
             8 => Some(Self::Busy),
             9 => Some(Self::JournalUnavailable),
             10 => Some(Self::InternalError),
+            11 => Some(Self::CatalogConflict),
             _ => None,
         }
     }
@@ -171,6 +182,63 @@ pub struct StatusResponse {
     pub remaining_duration_ms: u32,
     pub journal: JournalStatus,
     pub clock_known: bool,
+    pub status_epoch: Option<StatusEpoch>,
+    pub status_revision: Option<u64>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CatalogEntry {
+    pub preset: PresetSnapshot,
+    pub built_in: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PresetCatalogResponse {
+    pub revision: u64,
+    pub entries: Vec<CatalogEntry, MAX_TOTAL_PRESETS>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProposePresetCatalogRequest {
+    pub expected_revision: u64,
+    pub proposal_id: u32,
+    pub custom_entries: Vec<PresetSnapshot, MAX_CUSTOM_PRESETS>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ProposePresetCatalogResponse {
+    pub proposal_id: u32,
+    pub expires_in_ms: u32,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u8)]
+pub enum CatalogResult {
+    Committed = 0,
+    Rejected = 1,
+    Expired = 2,
+    Cancelled = 3,
+    StorageFailed = 4,
+}
+
+impl CatalogResult {
+    pub(crate) const fn from_wire(value: u64) -> Option<Self> {
+        match value {
+            0 => Some(Self::Committed),
+            1 => Some(Self::Rejected),
+            2 => Some(Self::Expired),
+            3 => Some(Self::Cancelled),
+            4 => Some(Self::StorageFailed),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PresetCatalogResultEvent {
+    pub proposal_id: u32,
+    pub result: CatalogResult,
+    pub catalog_revision: Option<u64>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -221,11 +289,14 @@ pub struct ErrorResponse {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[allow(clippy::large_enum_variant)]
 pub enum Request {
     Hello,
     GetStatus,
     GetSessionPage(SessionPageRequest),
     SetClockAnchor(ClockAnchorRequest),
+    GetPresetCatalog,
+    ProposePresetCatalog(ProposePresetCatalogRequest),
     Unknown { message_kind: u64 },
 }
 
@@ -237,6 +308,8 @@ impl Request {
             Self::GetStatus => 3,
             Self::GetSessionPage(_) => 5,
             Self::SetClockAnchor(_) => 7,
+            Self::GetPresetCatalog => 9,
+            Self::ProposePresetCatalog(_) => 11,
             Self::Unknown { message_kind } => *message_kind,
         }
     }
@@ -251,6 +324,8 @@ pub enum Response {
     Status(StatusResponse),
     SessionPage(SessionPageResponse),
     ClockAnchor(ClockAnchorResponse),
+    PresetCatalog(PresetCatalogResponse),
+    ProposePresetCatalog(ProposePresetCatalogResponse),
     Error(ErrorResponse),
 }
 
@@ -261,6 +336,8 @@ impl Response {
             Self::Status(_) => 4,
             Self::SessionPage(_) => 6,
             Self::ClockAnchor(_) => 8,
+            Self::PresetCatalog(_) => 10,
+            Self::ProposePresetCatalog(_) => 12,
             Self::Error(_) => 255,
         }
     }
@@ -278,4 +355,25 @@ pub struct ResponseEnvelope {
     pub version: ProtocolVersion,
     pub request_id: u32,
     pub response: Response,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum DeviceEvent {
+    LiveStatus(StatusResponse),
+    PresetCatalogResult(PresetCatalogResultEvent),
+}
+
+impl DeviceEvent {
+    pub(crate) const fn message_kind(&self) -> u64 {
+        match self {
+            Self::LiveStatus(_) => 13,
+            Self::PresetCatalogResult(_) => 14,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EventEnvelope {
+    pub version: ProtocolVersion,
+    pub event: DeviceEvent,
 }

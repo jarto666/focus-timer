@@ -3,10 +3,15 @@ import {
   ProtocolErrorCode,
   PROTOCOL_MAJOR,
   PROTOCOL_MINOR,
+  decodeEvent,
   decodeResponse,
   encodeRequest,
   type ClockAnchorResponse,
   type HelloResponse,
+  type DeviceEvent,
+  type PresetCatalogResponse,
+  type ProposePresetCatalogRequest,
+  type ProposePresetCatalogResponse,
   type Request,
   type Response,
   type SessionPageRequest,
@@ -49,6 +54,9 @@ export class DeviceClient {
   private requestInFlight = false;
   private negotiatedMinor: number | undefined;
   private helloResponse: HelloResponse | undefined;
+  private latestStatusResponse: StatusResponse | undefined;
+  private latestStatusEpoch: string | undefined;
+  private latestStatusRevision: number | undefined;
 
   constructor(private readonly transport: DeviceTransport) {}
 
@@ -56,10 +64,17 @@ export class DeviceClient {
     return this.helloResponse;
   }
 
+  get latestStatus(): StatusResponse | undefined {
+    return this.latestStatusResponse;
+  }
+
   resetSession(): void {
     this.negotiatedMinor = undefined;
     this.helloResponse = undefined;
     this.requestInFlight = false;
+    this.latestStatusResponse = undefined;
+    this.latestStatusEpoch = undefined;
+    this.latestStatusRevision = undefined;
   }
 
   async handshake(operation: DeviceTransportOperation): Promise<HelloResponse> {
@@ -108,7 +123,79 @@ export class DeviceClient {
     const response = await this.exchangeReady({ type: 'getStatus' }, operation);
     if (response.type === 'error') throw remoteError(response);
     if (response.type !== 'status') throw unexpected('status', response.type);
-    return response.status;
+    this.observeStatus(response.status);
+    return this.latestStatusResponse ?? response.status;
+  }
+
+  async getPresetCatalog(operation: DeviceTransportOperation): Promise<PresetCatalogResponse> {
+    this.requireCapability(Capability.ReadPresetCatalog);
+    const response = await this.exchangeReady({ type: 'getPresetCatalog' }, operation);
+    if (response.type === 'error') throw remoteError(response);
+    if (response.type !== 'presetCatalog') throw unexpected('presetCatalog', response.type);
+    return response.catalog;
+  }
+
+  async proposePresetCatalog(
+    proposal: ProposePresetCatalogRequest,
+    operation: DeviceTransportOperation,
+  ): Promise<ProposePresetCatalogResponse> {
+    this.requireCapability(Capability.ProposePresetCatalog);
+    const response = await this.exchangeReady(
+      { type: 'proposePresetCatalog', proposal },
+      operation,
+    );
+    if (response.type === 'error') throw remoteError(response);
+    if (response.type !== 'proposePresetCatalog') {
+      throw unexpected('proposePresetCatalog', response.type);
+    }
+    return response.proposal;
+  }
+
+  subscribeToEvents(
+    listener: (event: DeviceEvent) => void,
+    recoveryNeeded: (reason: 'gap' | 'malformed' | 'transport') => void,
+  ): () => void {
+    this.requireCapability(Capability.LiveStatus);
+    return this.transport.subscribeToEvents(
+      (payload) => {
+        try {
+          const envelope = decodeEvent(payload);
+          if (envelope.version.major !== PROTOCOL_MAJOR) {
+            recoveryNeeded('malformed');
+            return;
+          }
+          if (envelope.event.type === 'liveStatus') {
+            const disposition = this.observeStatus(envelope.event.status);
+            if (disposition === 'stale') return;
+            if (disposition === 'gap') recoveryNeeded('gap');
+          }
+          listener(envelope.event);
+        } catch {
+          recoveryNeeded('malformed');
+        }
+      },
+      () => recoveryNeeded('transport'),
+    );
+  }
+
+  observeStatus(status: StatusResponse): 'accepted' | 'gap' | 'stale' | 'unordered' {
+    if (status.statusEpoch === undefined || status.statusRevision === undefined) {
+      this.latestStatusResponse = status;
+      return 'unordered';
+    }
+    const epoch = bytesKey(status.statusEpoch);
+    if (this.latestStatusEpoch !== epoch) {
+      this.latestStatusEpoch = epoch;
+      this.latestStatusRevision = status.statusRevision;
+      this.latestStatusResponse = status;
+      return 'accepted';
+    }
+    const previous = this.latestStatusRevision;
+    if (previous !== undefined && status.statusRevision <= previous) return 'stale';
+    const gap = previous !== undefined && status.statusRevision > previous + 1;
+    this.latestStatusRevision = status.statusRevision;
+    this.latestStatusResponse = status;
+    return gap ? 'gap' : 'accepted';
   }
 
   async getSessionPage(
@@ -230,4 +317,8 @@ function unexpected(expected: string, received: string): DeviceClientError {
     {},
     `Expected ${expected} response, received ${received}`,
   );
+}
+
+function bytesKey(bytes: Uint8Array): string {
+  return [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('');
 }

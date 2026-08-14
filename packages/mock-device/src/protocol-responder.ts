@@ -9,6 +9,7 @@ import {
   protocolVersion,
   type RequestEnvelope,
   type Response,
+  type PresetSnapshot,
   type SessionRecord,
 } from '@focus-timer/device-protocol';
 
@@ -22,9 +23,40 @@ export function createProtocolMockTransport(scenario: MockScenario | MockScenari
 }
 
 export function createProtocolResponder(device: DeterministicMockDevice): MockRequestResponder {
+  let catalogRevision = 0;
+  let customEntries: readonly PresetSnapshot[] = [];
   return (payload) => {
     const request = decodeRequest(payload);
-    const response = respond(device, request);
+    let response: Response;
+    if (request.request.type === 'getPresetCatalog') {
+      response = {
+        type: 'presetCatalog',
+        catalog: {
+          revision: catalogRevision,
+          entries: [
+            ...mockBuiltIns,
+            ...customEntries.map((entry) => ({ ...entry, builtIn: false })),
+          ],
+        },
+      };
+    } else if (request.request.type === 'proposePresetCatalog') {
+      const proposal = request.request.proposal;
+      if (proposal.expectedRevision !== catalogRevision) {
+        response = {
+          type: 'error',
+          error: { code: ProtocolErrorCode.CatalogConflict, failedMessageKind: 11 },
+        };
+      } else {
+        customEntries = proposal.customEntries;
+        catalogRevision += 1;
+        response = {
+          type: 'proposePresetCatalog',
+          proposal: { proposalId: proposal.proposalId, expiresInMs: 15_000 },
+        };
+      }
+    } else {
+      response = respond(device, request);
+    }
     return encodeResponse({
       version:
         response.type === 'error' &&
@@ -70,6 +102,9 @@ function respond(device: DeterministicMockDevice, envelope: RequestEnvelope): Re
           Capability.ReadStatus,
           Capability.ReadSessionPages,
           Capability.SetClockAnchor,
+          Capability.LiveStatus,
+          Capability.ReadPresetCatalog,
+          Capability.ProposePresetCatalog,
         ],
       },
     };
@@ -95,6 +130,8 @@ function respond(device: DeterministicMockDevice, envelope: RequestEnvelope): Re
             health: status.journalHealthy ? JournalHealth.Healthy : JournalHealth.Degraded,
           },
           clockKnown: status.clockKnown,
+          statusEpoch: stableBytes('mock-status-epoch', 8),
+          statusRevision: 1,
         },
       };
     }
@@ -141,6 +178,9 @@ function respond(device: DeterministicMockDevice, envelope: RequestEnvelope): Re
         },
       };
     }
+    case 'getPresetCatalog':
+    case 'proposePresetCatalog':
+      throw new Error('Catalog requests are handled by the stateful responder');
     case 'unknown':
       return {
         type: 'error',
@@ -151,6 +191,19 @@ function respond(device: DeterministicMockDevice, envelope: RequestEnvelope): Re
       };
   }
 }
+
+const mockBuiltIns = [
+  ['deep-work', 'Deep Work', 5_400_000],
+  ['focus', 'Focus', 3_000_000],
+  ['pomodoro', 'Pomodoro', 1_500_000],
+  ['reading', 'Reading', 2_700_000],
+  ['quick-sprint', 'Quick Sprint', 900_000],
+].map(([id, name, plannedDurationMs]) => ({
+  id: id as string,
+  name: name as string,
+  plannedDurationMs: plannedDurationMs as number,
+  builtIn: true,
+}));
 
 function toProtocolRecord(record: MockSessionRecord): SessionRecord {
   return {

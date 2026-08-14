@@ -53,6 +53,54 @@ fn one_and_many_frame_messages_round_trip() {
 }
 
 #[test]
+fn response_and_event_transfers_reassemble_independently() {
+    let response = frames(b"correlated response", 21, BLE_FRAME_HEADER_BYTES + 4);
+    let event = frames(b"unsolicited event", 22, BLE_FRAME_HEADER_BYTES + 3);
+    let mut response_channel = Reassembler::new();
+    let mut event_channel = Reassembler::new();
+    let turns = response.len().max(event.len());
+    for index in 0..turns {
+        if let Some(frame) = response.get(index) {
+            response_channel.accept_frame(frame, index as u64).unwrap();
+        }
+        if let Some(frame) = event.get(index) {
+            event_channel.accept_frame(frame, index as u64).unwrap();
+        }
+    }
+    assert_eq!(
+        response_channel.completed_message(),
+        Some(b"correlated response".as_slice())
+    );
+    assert_eq!(
+        event_channel.completed_message(),
+        Some(b"unsolicited event".as_slice())
+    );
+}
+
+#[test]
+fn duplicate_start_is_bounded_and_a_fresh_transfer_recovers() {
+    let source = frames(b"duplicate start transfer", 31, BLE_FRAME_HEADER_BYTES + 4);
+    let mut reassembler = Reassembler::new();
+    assert_eq!(
+        reassembler.accept_frame(&source[0], 0),
+        Ok(ReassemblyStatus::InProgress)
+    );
+    assert_eq!(
+        reassembler.accept_frame(&source[0], 1),
+        Err(ReassemblyError::DuplicateStart)
+    );
+    let retry = frames(b"recovered", 32, 64);
+    assert!(matches!(
+        reassembler.accept_frame(&retry[0], 2),
+        Ok(ReassemblyStatus::Complete { .. })
+    ));
+    assert_eq!(
+        reassembler.completed_message(),
+        Some(b"recovered".as_slice())
+    );
+}
+
+#[test]
 fn owned_fragmenter_matches_the_borrowed_stream() {
     let message = b"a response retained across many non-blocking event-loop ticks";
     let maximum_frame_bytes = BLE_FRAME_HEADER_BYTES + 7;

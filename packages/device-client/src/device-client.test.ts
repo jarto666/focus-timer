@@ -6,6 +6,7 @@ import {
   PROTOCOL_MAJOR,
   PROTOCOL_MINOR,
   decodeRequest,
+  encodeEvent,
   encodeResponse,
   type RequestEnvelope,
   type Response,
@@ -45,6 +46,7 @@ function helloResponse(): Response {
 class ProtocolTransport implements DeviceTransport {
   readonly kind = 'protocol-test';
   readonly requests: RequestEnvelope[] = [];
+  private eventListener: ((payload: Uint8Array) => void) | null = null;
 
   constructor(private readonly respond: (request: RequestEnvelope) => Response) {}
 
@@ -68,6 +70,17 @@ class ProtocolTransport implements DeviceTransport {
       requestId: request.requestId,
       response: this.respond(request),
     });
+  }
+
+  subscribeToEvents(listener: (payload: Uint8Array) => void) {
+    this.eventListener = listener;
+    return () => {
+      this.eventListener = null;
+    };
+  }
+
+  emitEvent(payload: Uint8Array) {
+    this.eventListener?.(payload);
   }
 
   subscribeToDisconnect() {
@@ -159,5 +172,117 @@ describe('DeviceClient', () => {
     const client = new DeviceClient(transport);
     await expect(client.handshake(operation)).rejects.toBeInstanceOf(DeviceClientError);
     await expect(client.handshake(operation)).resolves.toMatchObject({ productName: 'FocusTimer' });
+  });
+
+  it('orders live events, detects gaps, and exposes catalog operations', async () => {
+    const transport = new ProtocolTransport((request) => {
+      if (request.request.type === 'hello') {
+        const response = helloResponse();
+        if (response.type !== 'hello') throw new Error('unreachable');
+        return {
+          ...response,
+          hello: {
+            ...response.hello,
+            capabilities: [
+              ...response.hello.capabilities,
+              Capability.LiveStatus,
+              Capability.ReadPresetCatalog,
+              Capability.ProposePresetCatalog,
+            ],
+          },
+        };
+      }
+      if (request.request.type === 'getPresetCatalog') {
+        return {
+          type: 'presetCatalog',
+          catalog: {
+            revision: 3,
+            entries: [
+              {
+                id: 'deep-work',
+                name: 'Deep Work',
+                plannedDurationMs: 5_400_000,
+                builtIn: true,
+              },
+              {
+                id: 'focus',
+                name: 'Focus',
+                plannedDurationMs: 3_000_000,
+                builtIn: true,
+              },
+              {
+                id: 'pomodoro',
+                name: 'Pomodoro',
+                plannedDurationMs: 1_500_000,
+                builtIn: true,
+              },
+              {
+                id: 'reading',
+                name: 'Reading',
+                plannedDurationMs: 2_700_000,
+                builtIn: true,
+              },
+              {
+                id: 'quick-sprint',
+                name: 'Quick Sprint',
+                plannedDurationMs: 900_000,
+                builtIn: true,
+              },
+            ],
+          },
+        };
+      }
+      if (request.request.type === 'proposePresetCatalog') {
+        return {
+          type: 'proposePresetCatalog',
+          proposal: { proposalId: request.request.proposal.proposalId, expiresInMs: 15_000 },
+        };
+      }
+      throw new Error(`Unhandled ${request.request.type}`);
+    });
+    const client = new DeviceClient(transport);
+    await client.handshake(operation);
+    const revisions: number[] = [];
+    const recovery: string[] = [];
+    const unsubscribe = client.subscribeToEvents(
+      (event) => {
+        if (event.type === 'liveStatus') revisions.push(event.status.statusRevision!);
+      },
+      (reason) => recovery.push(reason),
+    );
+    const live = (revision: number) =>
+      encodeEvent({
+        version: { major: 1, minor: 1 },
+        event: {
+          type: 'liveStatus',
+          status: {
+            viewState: 1,
+            preset: { id: 'focus', name: 'Focus', plannedDurationMs: 3_000_000 },
+            remainingDurationMs: 2_000_000,
+            journal: { epoch: bytes(8, 2), health: 0 },
+            clockKnown: true,
+            statusEpoch: bytes(8, 9),
+            statusRevision: revision,
+          },
+        },
+      });
+    transport.emitEvent(live(2));
+    transport.emitEvent(live(1));
+    transport.emitEvent(live(4));
+    transport.emitEvent(Uint8Array.of(0xff));
+    expect(revisions).toEqual([2, 4]);
+    expect(recovery).toEqual(['gap', 'malformed']);
+    await expect(client.getPresetCatalog(operation)).resolves.toMatchObject({ revision: 3 });
+    await expect(
+      client.proposePresetCatalog(
+        {
+          expectedRevision: 3,
+          proposalId: 41,
+          customEntries: [{ id: 'flow', name: 'Flow', plannedDurationMs: 1_800_000 }],
+        },
+        operation,
+      ),
+    ).resolves.toMatchObject({ proposalId: 41 });
+    unsubscribe();
   });
 });

@@ -3,6 +3,11 @@ use core::cmp;
 use crate::{Catalog, Preset, PresetId, SettingsFallback, SettingsLoad, restore_selection};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CatalogReplaceError {
+    SessionNotIdle,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum InputEvent {
     RotateLeft,
     RotateRight,
@@ -34,7 +39,7 @@ pub enum SessionOutcomeKind {
 ///
 /// Adapters may persist this value after the core transition has completed,
 /// but persistence failure cannot roll the transition back.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SessionOutcome {
     pub kind: SessionOutcomeKind,
     pub preset: Preset,
@@ -43,7 +48,7 @@ pub struct SessionOutcome {
 }
 
 /// Best-effort work for firmware adapters after state has been committed.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Effects {
     pub render: bool,
     pub feedback: Option<FeedbackPattern>,
@@ -52,7 +57,7 @@ pub struct Effects {
     pub outcome: Option<SessionOutcome>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SessionState {
     Idle,
     Running { active: Preset, deadline_ms: u64 },
@@ -69,7 +74,7 @@ pub enum ViewState {
 }
 
 /// Immutable data consumed by display and feedback adapters.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AppSnapshot {
     pub state: ViewState,
     pub preset: Preset,
@@ -89,7 +94,7 @@ impl App {
     /// Boots safely into Idle and reports invalid persisted settings as an effect.
     #[must_use]
     pub fn boot(catalog: Catalog, settings: SettingsLoad<'_>) -> (Self, Effects) {
-        let (selected_index, fallback) = restore_selection(catalog, settings);
+        let (selected_index, fallback) = restore_selection(&catalog, settings);
         let effects = Effects {
             render: true,
             diagnostic: fallback.map(Diagnostic::SettingsFallback),
@@ -107,13 +112,47 @@ impl App {
     }
 
     #[must_use]
-    pub const fn session(&self) -> SessionState {
-        self.session
+    pub fn session(&self) -> SessionState {
+        self.session.clone()
     }
 
     #[must_use]
     pub fn selected_preset(&self) -> Preset {
         self.catalog.preset(self.selected_index)
+    }
+
+    #[must_use]
+    pub fn catalog(&self) -> &Catalog {
+        &self.catalog
+    }
+
+    #[must_use]
+    pub const fn is_idle(&self) -> bool {
+        matches!(self.session, SessionState::Idle)
+    }
+
+    /// Atomically swaps a fully validated catalog while Idle.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CatalogReplaceError::SessionNotIdle`] while a session is active or completed.
+    pub fn replace_catalog(&mut self, catalog: Catalog) -> Result<Effects, CatalogReplaceError> {
+        if !self.is_idle() {
+            return Err(CatalogReplaceError::SessionNotIdle);
+        }
+        let selected_id = self.selected_preset().id;
+        let selected_index = catalog
+            .find(selected_id.as_str())
+            .or_else(|| catalog.find("focus"))
+            .unwrap_or(catalog.default_index());
+        let selected_changed = catalog.preset(selected_index).id != selected_id;
+        self.catalog = catalog;
+        self.selected_index = selected_index;
+        Ok(Effects {
+            render: true,
+            persist_selection: selected_changed.then(|| self.selected_preset().id),
+            ..Effects::default()
+        })
     }
 
     /// Applies one semantic input at a monotonic timestamp.
@@ -126,7 +165,7 @@ impl App {
         };
 
         if self.complete_if_due(now_ms) {
-            let SessionState::Completed { active } = self.session else {
+            let SessionState::Completed { active } = self.session.clone() else {
                 unreachable!();
             };
             return Effects {
@@ -135,7 +174,7 @@ impl App {
                 diagnostic: clock_diagnostic,
                 outcome: Some(SessionOutcome {
                     kind: SessionOutcomeKind::Completed,
-                    preset: active,
+                    preset: active.clone(),
                     planned_duration_ms: active.duration_ms,
                     active_duration_ms: active.duration_ms,
                 }),
@@ -143,7 +182,7 @@ impl App {
             };
         }
 
-        let mut effects = match (self.session, event) {
+        let mut effects = match (self.session.clone(), event) {
             (SessionState::Idle, InputEvent::RotateLeft) => self.rotate_left(),
             (SessionState::Idle, InputEvent::RotateRight) => self.rotate_right(),
             (SessionState::Idle, InputEvent::Press) => self.start(now_ms),
@@ -204,13 +243,14 @@ impl App {
     /// Builds a read-only view; it never transitions or owns elapsed-time truth.
     #[must_use]
     pub fn snapshot(&self, now_ms: u64) -> AppSnapshot {
-        match self.session {
+        match self.session.clone() {
             SessionState::Idle => {
                 let preset = self.selected_preset();
+                let remaining_ms = preset.duration_ms;
                 AppSnapshot {
                     state: ViewState::Idle,
                     preset,
-                    remaining_ms: preset.duration_ms,
+                    remaining_ms,
                 }
             }
             SessionState::Running {
@@ -241,7 +281,7 @@ impl App {
         if let SessionState::Running {
             active,
             deadline_ms,
-        } = self.session
+        } = self.session.clone()
             && now_ms >= deadline_ms
         {
             self.session = SessionState::Completed { active };
@@ -315,13 +355,14 @@ fn diagnostic_effect(diagnostic: Diagnostic) -> Effects {
 }
 
 fn cancellation_effect(active: Preset, remaining_ms: u64) -> Effects {
+    let planned_duration_ms = active.duration_ms;
     Effects {
         render: true,
         outcome: Some(SessionOutcome {
             kind: SessionOutcomeKind::Cancelled,
             preset: active,
-            planned_duration_ms: active.duration_ms,
-            active_duration_ms: active.duration_ms.saturating_sub(remaining_ms),
+            planned_duration_ms,
+            active_duration_ms: planned_duration_ms.saturating_sub(remaining_ms),
         }),
         ..Effects::default()
     }

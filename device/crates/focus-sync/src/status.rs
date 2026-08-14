@@ -23,7 +23,7 @@ impl JournalStatus {
 }
 
 /// Immutable read model copied out of the single-owner timer event loop.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DeviceStatus {
     pub view_state: ViewState,
     pub preset: Preset,

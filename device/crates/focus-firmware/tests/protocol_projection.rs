@@ -1,4 +1,4 @@
-use focus_core::{App, Catalog, DEFAULT_PRESETS, SettingsLoad};
+use focus_core::{App, SettingsLoad, default_catalog};
 use focus_firmware::protocol_projection::{
     ProjectionError, session_page_response, status_response,
 };
@@ -18,7 +18,7 @@ fn text<const N: usize>(value: &str) -> String<N> {
 
 #[test]
 fn immutable_status_is_copied_without_timer_access_or_fabrication() {
-    let catalog = Catalog::new(&DEFAULT_PRESETS, 2).unwrap();
+    let catalog = default_catalog();
     let app = App::boot(catalog, SettingsLoad::Missing).0;
     let source = project_status(
         &app,
@@ -32,7 +32,7 @@ fn immutable_status_is_copied_without_timer_access_or_fabrication() {
         VolatileClock::new(),
     );
 
-    let projected = status_response(source).unwrap();
+    let projected = status_response(&source).unwrap();
     assert_eq!(projected.preset.id.as_str(), "pomodoro");
     assert_eq!(projected.remaining_duration_ms, 1_500_000);
     assert_eq!(projected.journal.health, ProtocolJournalHealth::Degraded);
@@ -66,7 +66,7 @@ fn page_projection_preserves_order_outcome_and_nullable_time() {
 
 #[test]
 fn projection_rejects_values_instead_of_truncating_them() {
-    let catalog = Catalog::new(&DEFAULT_PRESETS, 2).unwrap();
+    let catalog = default_catalog();
     let app = App::boot(catalog, SettingsLoad::Missing).0;
     let mut source = project_status(
         &app,
@@ -76,7 +76,7 @@ fn projection_rejects_values_instead_of_truncating_them() {
     );
     source.remaining_duration_ms = u64::from(u32::MAX) + 1;
     assert_eq!(
-        status_response(source),
+        status_response(&source),
         Err(ProjectionError::DurationOutOfRange)
     );
 }

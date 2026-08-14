@@ -71,6 +71,12 @@ export interface DeviceTransport {
 
   request(payload: Uint8Array, operation: DeviceTransportOperation): Promise<Uint8Array>;
 
+  /** One independent stream of complete unsolicited protocol messages. */
+  subscribeToEvents(
+    listener: (payload: Uint8Array) => void,
+    onError: (error: DeviceTransportError) => void,
+  ): () => void;
+
   subscribeToAvailability(listener: (state: DeviceTransportAvailability) => void): () => void;
 
   subscribeToDisconnect(listener: (event: DeviceTransportDisconnect) => void): () => void;

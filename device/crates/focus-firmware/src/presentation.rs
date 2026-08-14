@@ -33,7 +33,7 @@ pub const OLED_LAYOUT: OledLayout = OledLayout {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OledView {
     pub state_label: &'static str,
-    pub preset_name: &'static str,
+    pub preset_name: String<32>,
     pub time: TimeText,
     pub hint: &'static str,
 }
@@ -52,6 +52,27 @@ pub fn oled_view(snapshot: AppSnapshot) -> OledView {
         preset_name: snapshot.preset.name,
         time: format_duration(snapshot.remaining_ms),
         hint,
+    }
+}
+
+#[must_use]
+/// Builds the dedicated physical-approval frame.
+///
+/// # Panics
+///
+/// Panics only if the fixed product copy no longer fits its declared OLED buffers.
+pub fn catalog_confirmation_view(custom_count: usize) -> OledView {
+    let mut preset_name = String::new();
+    write!(preset_name, "{custom_count} custom presets")
+        .expect("bounded custom count fits the OLED line");
+    let mut time = TimeText::new();
+    time.push_str("UPDATE?")
+        .expect("confirmation label fits the OLED time buffer");
+    OledView {
+        state_label: "PHONE REQUEST",
+        preset_name,
+        time,
+        hint: "Press yes / hold no",
     }
 }
 
@@ -102,6 +123,7 @@ impl Default for RingFrame {
 
 /// Derives a static, non-animated frame from the immutable app snapshot.
 #[must_use]
+#[allow(clippy::needless_pass_by_value)]
 pub fn ring_frame(snapshot: AppSnapshot) -> RingFrame {
     let mut frame = RingFrame::default();
     match snapshot.state {

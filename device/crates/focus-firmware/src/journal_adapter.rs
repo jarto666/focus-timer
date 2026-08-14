@@ -78,7 +78,7 @@ impl OutcomeJournalQueue {
 
         let id = String::try_from(outcome.preset.id.as_str())
             .map_err(|()| ObserveError::PresetSnapshotTooLong)?;
-        let name = String::try_from(outcome.preset.name)
+        let name = String::try_from(outcome.preset.name.as_str())
             .map_err(|()| ObserveError::PresetSnapshotTooLong)?;
         self.pending = Some(PendingRecord {
             preset: PresetSnapshot {

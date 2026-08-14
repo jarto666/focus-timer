@@ -3,11 +3,13 @@ use core::str;
 use heapless::{String, Vec};
 
 use crate::model::{
-    Capability, ClockAnchorRequest, ClockAnchorResponse, ErrorCode, ErrorResponse, HelloResponse,
-    JournalHealth, JournalStatus, MAX_CAPABILITIES, MAX_FIRMWARE_VERSION_BYTES,
-    MAX_LOGICAL_MESSAGE_BYTES, MAX_PRESET_ID_BYTES, MAX_PRESET_NAME_BYTES, MAX_PRODUCT_NAME_BYTES,
-    MAX_RECORDS_PER_PAGE, MAX_SAFE_INTEGER, PresetSnapshot, ProtocolVersion, Request,
-    RequestEnvelope, Response, ResponseEnvelope, SessionOutcome, SessionPageRequest,
+    Capability, CatalogEntry, CatalogResult, ClockAnchorRequest, ClockAnchorResponse, DeviceEvent,
+    ErrorCode, ErrorResponse, EventEnvelope, HelloResponse, JournalHealth, JournalStatus,
+    MAX_CAPABILITIES, MAX_CUSTOM_PRESETS, MAX_FIRMWARE_VERSION_BYTES, MAX_LOGICAL_MESSAGE_BYTES,
+    MAX_PRESET_ID_BYTES, MAX_PRESET_NAME_BYTES, MAX_PRODUCT_NAME_BYTES, MAX_RECORDS_PER_PAGE,
+    MAX_SAFE_INTEGER, MAX_TOTAL_PRESETS, PresetCatalogResponse, PresetCatalogResultEvent,
+    PresetSnapshot, ProposePresetCatalogRequest, ProposePresetCatalogResponse, ProtocolVersion,
+    Request, RequestEnvelope, Response, ResponseEnvelope, SessionOutcome, SessionPageRequest,
     SessionPageResponse, SessionRecord, StatusResponse, ViewState,
 };
 
@@ -15,6 +17,8 @@ const MAX_MAP_ENTRIES: usize = 16;
 const MAX_ARRAY_ITEMS: usize = 8;
 const MAX_TEXT_BYTES: usize = 32;
 const MAX_NESTING_DEPTH: usize = 6;
+const BUILT_IN_PRESET_IDS: [&str; 5] =
+    ["deep-work", "focus", "pomodoro", "reading", "quick-sprint"];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum EncodeError {
@@ -81,6 +85,25 @@ pub fn encode_response(
     Ok(encoder.position)
 }
 
+/// Encodes one unsolicited device event. Event envelopes always carry request ID zero.
+/// Encodes one validated unsolicited event envelope.
+///
+/// # Errors
+///
+/// Returns a bounded encoding or model-validation error.
+pub fn encode_event(envelope: &EventEnvelope, output: &mut [u8]) -> Result<usize, EncodeError> {
+    validate_event(envelope)?;
+    let mut encoder = Encoder::new(output);
+    encode_envelope_prefix(
+        &mut encoder,
+        envelope.version,
+        0,
+        envelope.event.message_kind(),
+    )?;
+    encode_event_payload(&mut encoder, &envelope.event)?;
+    Ok(encoder.position)
+}
+
 /// Decodes and validates one request envelope from constrained CBOR.
 ///
 /// # Errors
@@ -106,7 +129,11 @@ pub fn decode_request(input: &[u8]) -> Result<RequestEnvelope, DecodeError> {
             3 => message_kind = Some(decoder.uint()?),
             4 => {
                 let kind = message_kind.ok_or(DecodeError::MissingField(3))?;
-                request = Some(decode_request_payload(&mut decoder, kind)?);
+                request = Some(decode_request_payload(
+                    &mut decoder,
+                    kind,
+                    minor.ok_or(DecodeError::MissingField(1))?,
+                )?);
             }
             _ => decoder.skip_value(1)?,
         }
@@ -150,7 +177,11 @@ pub fn decode_response(input: &[u8]) -> Result<ResponseEnvelope, DecodeError> {
             3 => message_kind = Some(decoder.uint()?),
             4 => {
                 let kind = message_kind.ok_or(DecodeError::MissingField(3))?;
-                response = Some(decode_response_payload(&mut decoder, kind)?);
+                response = Some(decode_response_payload(
+                    &mut decoder,
+                    kind,
+                    minor.ok_or(DecodeError::MissingField(1))?,
+                )?);
             }
             _ => decoder.skip_value(1)?,
         }
@@ -166,6 +197,55 @@ pub fn decode_response(input: &[u8]) -> Result<ResponseEnvelope, DecodeError> {
         response: response.ok_or(DecodeError::MissingField(4))?,
     };
     validate_response(&envelope).map_err(|_| DecodeError::InvalidValue(4))?;
+    Ok(envelope)
+}
+
+/// Decodes one unsolicited device event and requires the reserved zero request ID.
+/// Decodes one complete constrained-CBOR unsolicited event envelope.
+///
+/// # Errors
+///
+/// Returns a canonical decoding or model-validation error.
+pub fn decode_event(input: &[u8]) -> Result<EventEnvelope, DecodeError> {
+    let mut decoder = Decoder::new(input)?;
+    let map_len = decoder.map_len()?;
+    let mut previous_key = None;
+    let mut major = None;
+    let mut minor = None;
+    let mut request_id = None;
+    let mut message_kind = None;
+    let mut event = None;
+
+    for _ in 0..map_len {
+        let key = decoder.map_key(&mut previous_key)?;
+        match key {
+            0 => major = Some(decoder.uint_u8(0)?),
+            1 => minor = Some(decoder.uint_u8(1)?),
+            2 => request_id = Some(decoder.uint_u32(2)?),
+            3 => message_kind = Some(decoder.uint()?),
+            4 => {
+                let kind = message_kind.ok_or(DecodeError::MissingField(3))?;
+                event = Some(decode_event_payload(
+                    &mut decoder,
+                    kind,
+                    minor.ok_or(DecodeError::MissingField(1))?,
+                )?);
+            }
+            _ => decoder.skip_value(1)?,
+        }
+    }
+    decoder.finish()?;
+    if request_id.ok_or(DecodeError::MissingField(2))? != 0 {
+        return Err(DecodeError::InvalidValue(2));
+    }
+    let envelope = EventEnvelope {
+        version: ProtocolVersion {
+            major: major.ok_or(DecodeError::MissingField(0))?,
+            minor: minor.ok_or(DecodeError::MissingField(1))?,
+        },
+        event: event.ok_or(DecodeError::MissingField(4))?,
+    };
+    validate_event(&envelope).map_err(|_| DecodeError::InvalidValue(4))?;
     Ok(envelope)
 }
 
@@ -189,7 +269,10 @@ fn encode_envelope_prefix(
 
 fn encode_request_payload(encoder: &mut Encoder<'_>, request: &Request) -> Result<(), EncodeError> {
     match request {
-        Request::Hello | Request::GetStatus | Request::Unknown { .. } => encoder.map(0),
+        Request::Hello
+        | Request::GetStatus
+        | Request::GetPresetCatalog
+        | Request::Unknown { .. } => encoder.map(0),
         Request::GetSessionPage(page) => {
             encoder.map(if page.journal_epoch.is_some() { 3 } else { 2 })?;
             if let Some(epoch) = page.journal_epoch {
@@ -206,6 +289,19 @@ fn encode_request_payload(encoder: &mut Encoder<'_>, request: &Request) -> Resul
             encoder.uint(0)?;
             encoder.uint(anchor.utc_ms)
         }
+        Request::ProposePresetCatalog(proposal) => {
+            encoder.map(3)?;
+            encoder.uint(0)?;
+            encoder.uint(proposal.expected_revision)?;
+            encoder.uint(1)?;
+            encoder.uint(u64::from(proposal.proposal_id))?;
+            encoder.uint(2)?;
+            encoder.array(proposal.custom_entries.len())?;
+            for preset in &proposal.custom_entries {
+                encode_preset(encoder, preset)?;
+            }
+            Ok(())
+        }
     }
 }
 
@@ -218,7 +314,16 @@ fn encode_response_payload(
         Response::Status(status) => encode_status(encoder, status),
         Response::SessionPage(page) => encode_session_page(encoder, page),
         Response::ClockAnchor(anchor) => encode_clock_anchor(encoder, *anchor),
+        Response::PresetCatalog(catalog) => encode_preset_catalog(encoder, catalog),
+        Response::ProposePresetCatalog(proposal) => encode_catalog_proposal(encoder, *proposal),
         Response::Error(error) => encode_error(encoder, *error),
+    }
+}
+
+fn encode_event_payload(encoder: &mut Encoder<'_>, event: &DeviceEvent) -> Result<(), EncodeError> {
+    match event {
+        DeviceEvent::LiveStatus(status) => encode_status(encoder, status),
+        DeviceEvent::PresetCatalogResult(result) => encode_catalog_result(encoder, *result),
     }
 }
 
@@ -243,7 +348,8 @@ fn encode_hello(encoder: &mut Encoder<'_>, hello: &HelloResponse) -> Result<(), 
 }
 
 fn encode_status(encoder: &mut Encoder<'_>, status: &StatusResponse) -> Result<(), EncodeError> {
-    encoder.map(5)?;
+    let has_live_order = status.status_epoch.is_some();
+    encoder.map(if has_live_order { 7 } else { 5 })?;
     encoder.uint(0)?;
     encoder.uint(u64::from(status.view_state as u8))?;
     encoder.uint(1)?;
@@ -253,7 +359,16 @@ fn encode_status(encoder: &mut Encoder<'_>, status: &StatusResponse) -> Result<(
     encoder.uint(3)?;
     encode_journal_status(encoder, status.journal)?;
     encoder.uint(4)?;
-    encoder.boolean(status.clock_known)
+    encoder.boolean(status.clock_known)?;
+    if let Some(epoch) = status.status_epoch {
+        encoder.uint(5)?;
+        encoder.bytes(&epoch)?;
+    }
+    if let Some(revision) = status.status_revision {
+        encoder.uint(6)?;
+        encoder.uint(revision)?;
+    }
+    Ok(())
 }
 
 fn encode_preset(encoder: &mut Encoder<'_>, preset: &PresetSnapshot) -> Result<(), EncodeError> {
@@ -366,6 +481,60 @@ fn encode_clock_anchor(
     encoder.uint(anchor.device_monotonic_ms_at_receipt)
 }
 
+fn encode_preset_catalog(
+    encoder: &mut Encoder<'_>,
+    catalog: &PresetCatalogResponse,
+) -> Result<(), EncodeError> {
+    encoder.map(2)?;
+    encoder.uint(0)?;
+    encoder.uint(catalog.revision)?;
+    encoder.uint(1)?;
+    encoder.array(catalog.entries.len())?;
+    for entry in &catalog.entries {
+        encoder.map(4)?;
+        encoder.uint(0)?;
+        encoder.text(&entry.preset.id)?;
+        encoder.uint(1)?;
+        encoder.text(&entry.preset.name)?;
+        encoder.uint(2)?;
+        encoder.uint(u64::from(entry.preset.planned_duration_ms))?;
+        encoder.uint(3)?;
+        encoder.boolean(entry.built_in)?;
+    }
+    Ok(())
+}
+
+fn encode_catalog_proposal(
+    encoder: &mut Encoder<'_>,
+    proposal: ProposePresetCatalogResponse,
+) -> Result<(), EncodeError> {
+    encoder.map(2)?;
+    encoder.uint(0)?;
+    encoder.uint(u64::from(proposal.proposal_id))?;
+    encoder.uint(1)?;
+    encoder.uint(u64::from(proposal.expires_in_ms))
+}
+
+fn encode_catalog_result(
+    encoder: &mut Encoder<'_>,
+    result: PresetCatalogResultEvent,
+) -> Result<(), EncodeError> {
+    encoder.map(if result.catalog_revision.is_some() {
+        3
+    } else {
+        2
+    })?;
+    encoder.uint(0)?;
+    encoder.uint(u64::from(result.proposal_id))?;
+    encoder.uint(1)?;
+    encoder.uint(u64::from(result.result as u8))?;
+    if let Some(revision) = result.catalog_revision {
+        encoder.uint(2)?;
+        encoder.uint(revision)?;
+    }
+    Ok(())
+}
+
 fn encode_error(encoder: &mut Encoder<'_>, error: ErrorResponse) -> Result<(), EncodeError> {
     let mut field_count = 1;
     if error.failed_message_kind.is_some() {
@@ -397,7 +566,11 @@ fn encode_error(encoder: &mut Encoder<'_>, error: ErrorResponse) -> Result<(), E
     Ok(())
 }
 
-fn decode_request_payload(decoder: &mut Decoder<'_>, kind: u64) -> Result<Request, DecodeError> {
+fn decode_request_payload(
+    decoder: &mut Decoder<'_>,
+    kind: u64,
+    protocol_minor: u8,
+) -> Result<Request, DecodeError> {
     match kind {
         1 => {
             decoder.empty_map()?;
@@ -409,6 +582,13 @@ fn decode_request_payload(decoder: &mut Decoder<'_>, kind: u64) -> Result<Reques
         }
         5 => decode_session_page_request(decoder).map(Request::GetSessionPage),
         7 => decode_clock_anchor_request(decoder).map(Request::SetClockAnchor),
+        9 if protocol_minor >= 1 => {
+            decoder.empty_map()?;
+            Ok(Request::GetPresetCatalog)
+        }
+        11 if protocol_minor >= 1 => {
+            decode_preset_catalog_proposal(decoder).map(Request::ProposePresetCatalog)
+        }
         _ => {
             decoder.skip_map(2)?;
             Ok(Request::Unknown { message_kind: kind })
@@ -416,15 +596,70 @@ fn decode_request_payload(decoder: &mut Decoder<'_>, kind: u64) -> Result<Reques
     }
 }
 
-fn decode_response_payload(decoder: &mut Decoder<'_>, kind: u64) -> Result<Response, DecodeError> {
+fn decode_response_payload(
+    decoder: &mut Decoder<'_>,
+    kind: u64,
+    protocol_minor: u8,
+) -> Result<Response, DecodeError> {
     match kind {
         2 => decode_hello(decoder).map(Response::Hello),
         4 => decode_status(decoder).map(Response::Status),
         6 => decode_session_page(decoder).map(Response::SessionPage),
         8 => decode_clock_anchor_response(decoder).map(Response::ClockAnchor),
+        10 if protocol_minor >= 1 => decode_preset_catalog(decoder).map(Response::PresetCatalog),
+        12 if protocol_minor >= 1 => {
+            decode_catalog_proposal_response(decoder).map(Response::ProposePresetCatalog)
+        }
         255 => decode_error(decoder).map(Response::Error),
         _ => Err(DecodeError::UnsupportedMessage(kind)),
     }
+}
+
+fn decode_event_payload(
+    decoder: &mut Decoder<'_>,
+    kind: u64,
+    protocol_minor: u8,
+) -> Result<DeviceEvent, DecodeError> {
+    match kind {
+        13 if protocol_minor >= 1 => decode_status(decoder).map(DeviceEvent::LiveStatus),
+        14 if protocol_minor >= 1 => {
+            decode_catalog_result(decoder).map(DeviceEvent::PresetCatalogResult)
+        }
+        _ => Err(DecodeError::UnsupportedMessage(kind)),
+    }
+}
+
+fn decode_preset_catalog_proposal(
+    decoder: &mut Decoder<'_>,
+) -> Result<ProposePresetCatalogRequest, DecodeError> {
+    let len = decoder.map_len()?;
+    let mut previous = None;
+    let mut expected_revision = None;
+    let mut proposal_id = None;
+    let mut custom_entries = None;
+    for _ in 0..len {
+        let key = decoder.map_key(&mut previous)?;
+        match key {
+            0 => expected_revision = Some(decoder.uint()?),
+            1 => proposal_id = Some(decoder.uint_u32(1)?),
+            2 => {
+                let count = decoder.array_len()?;
+                let mut entries = Vec::new();
+                for _ in 0..count {
+                    entries
+                        .push(decode_preset(decoder)?)
+                        .map_err(|_| DecodeError::LimitExceeded)?;
+                }
+                custom_entries = Some(entries);
+            }
+            _ => decoder.skip_value(2)?,
+        }
+    }
+    Ok(ProposePresetCatalogRequest {
+        expected_revision: expected_revision.ok_or(DecodeError::MissingField(0))?,
+        proposal_id: proposal_id.ok_or(DecodeError::MissingField(1))?,
+        custom_entries: custom_entries.ok_or(DecodeError::MissingField(2))?,
+    })
 }
 
 fn decode_session_page_request(
@@ -531,6 +766,8 @@ fn decode_status(decoder: &mut Decoder<'_>) -> Result<StatusResponse, DecodeErro
     let mut remaining = None;
     let mut journal = None;
     let mut clock_known = None;
+    let mut status_epoch = None;
+    let mut status_revision = None;
     for _ in 0..len {
         let key = decoder.map_key(&mut previous)?;
         match key {
@@ -543,6 +780,8 @@ fn decode_status(decoder: &mut Decoder<'_>) -> Result<StatusResponse, DecodeErro
             2 => remaining = Some(decoder.uint_u32(2)?),
             3 => journal = Some(decode_journal_status(decoder)?),
             4 => clock_known = Some(decoder.boolean()?),
+            5 => status_epoch = Some(decoder.bytes_exact::<8>(5)?),
+            6 => status_revision = Some(decoder.uint()?),
             _ => decoder.skip_value(2)?,
         }
     }
@@ -552,6 +791,113 @@ fn decode_status(decoder: &mut Decoder<'_>) -> Result<StatusResponse, DecodeErro
         remaining_duration_ms: remaining.ok_or(DecodeError::MissingField(2))?,
         journal: journal.ok_or(DecodeError::MissingField(3))?,
         clock_known: clock_known.ok_or(DecodeError::MissingField(4))?,
+        status_epoch,
+        status_revision,
+    })
+}
+
+fn decode_preset_catalog(decoder: &mut Decoder<'_>) -> Result<PresetCatalogResponse, DecodeError> {
+    let len = decoder.map_len()?;
+    let mut previous = None;
+    let mut revision = None;
+    let mut entries = None;
+    for _ in 0..len {
+        let key = decoder.map_key(&mut previous)?;
+        match key {
+            0 => revision = Some(decoder.uint()?),
+            1 => {
+                let count = decoder.array_len_bounded(MAX_TOTAL_PRESETS)?;
+                let mut entries_value = Vec::new();
+                for _ in 0..count {
+                    entries_value
+                        .push(decode_catalog_entry(decoder)?)
+                        .map_err(|_| DecodeError::LimitExceeded)?;
+                }
+                entries = Some(entries_value);
+            }
+            _ => decoder.skip_value(2)?,
+        }
+    }
+    Ok(PresetCatalogResponse {
+        revision: revision.ok_or(DecodeError::MissingField(0))?,
+        entries: entries.ok_or(DecodeError::MissingField(1))?,
+    })
+}
+
+fn decode_catalog_entry(decoder: &mut Decoder<'_>) -> Result<CatalogEntry, DecodeError> {
+    let len = decoder.map_len()?;
+    let mut previous = None;
+    let mut id = None;
+    let mut name = None;
+    let mut duration = None;
+    let mut built_in = None;
+    for _ in 0..len {
+        let key = decoder.map_key(&mut previous)?;
+        match key {
+            0 => id = Some(decoder.text::<MAX_PRESET_ID_BYTES>(0)?),
+            1 => name = Some(decoder.text::<MAX_PRESET_NAME_BYTES>(1)?),
+            2 => duration = Some(decoder.uint_u32(2)?),
+            3 => built_in = Some(decoder.boolean()?),
+            _ => decoder.skip_value(3)?,
+        }
+    }
+    Ok(CatalogEntry {
+        preset: PresetSnapshot {
+            id: id.ok_or(DecodeError::MissingField(0))?,
+            name: name.ok_or(DecodeError::MissingField(1))?,
+            planned_duration_ms: duration.ok_or(DecodeError::MissingField(2))?,
+        },
+        built_in: built_in.ok_or(DecodeError::MissingField(3))?,
+    })
+}
+
+fn decode_catalog_proposal_response(
+    decoder: &mut Decoder<'_>,
+) -> Result<ProposePresetCatalogResponse, DecodeError> {
+    let len = decoder.map_len()?;
+    let mut previous = None;
+    let mut proposal_id = None;
+    let mut expires_in_ms = None;
+    for _ in 0..len {
+        let key = decoder.map_key(&mut previous)?;
+        match key {
+            0 => proposal_id = Some(decoder.uint_u32(0)?),
+            1 => expires_in_ms = Some(decoder.uint_u32(1)?),
+            _ => decoder.skip_value(2)?,
+        }
+    }
+    Ok(ProposePresetCatalogResponse {
+        proposal_id: proposal_id.ok_or(DecodeError::MissingField(0))?,
+        expires_in_ms: expires_in_ms.ok_or(DecodeError::MissingField(1))?,
+    })
+}
+
+fn decode_catalog_result(
+    decoder: &mut Decoder<'_>,
+) -> Result<PresetCatalogResultEvent, DecodeError> {
+    let len = decoder.map_len()?;
+    let mut previous = None;
+    let mut proposal_id = None;
+    let mut result = None;
+    let mut catalog_revision = None;
+    for _ in 0..len {
+        let key = decoder.map_key(&mut previous)?;
+        match key {
+            0 => proposal_id = Some(decoder.uint_u32(0)?),
+            1 => {
+                result = Some(
+                    CatalogResult::from_wire(decoder.uint()?)
+                        .ok_or(DecodeError::InvalidValue(1))?,
+                );
+            }
+            2 => catalog_revision = Some(decoder.uint()?),
+            _ => decoder.skip_value(2)?,
+        }
+    }
+    Ok(PresetCatalogResultEvent {
+        proposal_id: proposal_id.ok_or(DecodeError::MissingField(0))?,
+        result: result.ok_or(DecodeError::MissingField(1))?,
+        catalog_revision,
     })
 }
 
@@ -760,10 +1106,14 @@ fn validate_request(envelope: &RequestEnvelope) -> Result<(), EncodeError> {
             }
         }
         Request::SetClockAnchor(anchor) => validate_safe(anchor.utc_ms, "utc_ms")?,
+        Request::ProposePresetCatalog(proposal) => validate_catalog_proposal(proposal)?,
         Request::Unknown { message_kind } if *message_kind == 0 => {
             return Err(EncodeError::InvalidValue("message_kind"));
         }
-        Request::Hello | Request::GetStatus | Request::Unknown { .. } => {}
+        Request::Hello
+        | Request::GetStatus
+        | Request::GetPresetCatalog
+        | Request::Unknown { .. } => {}
     }
     Ok(())
 }
@@ -781,7 +1131,28 @@ fn validate_response(envelope: &ResponseEnvelope) -> Result<(), EncodeError> {
                 "device_monotonic_ms_at_receipt",
             )
         }
+        Response::PresetCatalog(catalog) => validate_catalog(catalog),
+        Response::ProposePresetCatalog(proposal) => {
+            validate_nonzero_id(proposal.proposal_id, "proposal_id")?;
+            if proposal.expires_in_ms == 0 {
+                return Err(EncodeError::InvalidValue("expires_in_ms"));
+            }
+            Ok(())
+        }
         Response::Error(error) => validate_error(*error),
+    }
+}
+
+fn validate_event(envelope: &EventEnvelope) -> Result<(), EncodeError> {
+    match &envelope.event {
+        DeviceEvent::LiveStatus(status) => {
+            validate_status(status)?;
+            if status.status_epoch.is_none() {
+                return Err(EncodeError::InvalidValue("status_epoch"));
+            }
+            Ok(())
+        }
+        DeviceEvent::PresetCatalogResult(result) => validate_catalog_result(*result),
     }
 }
 
@@ -811,7 +1182,92 @@ fn validate_status(status: &StatusResponse) -> Result<(), EncodeError> {
     validate_bounds(
         status.journal.oldest_sequence,
         status.journal.latest_sequence,
-    )
+    )?;
+    match (status.status_epoch, status.status_revision) {
+        (Some(_), Some(revision)) if revision != 0 => validate_safe(revision, "status_revision"),
+        (None, None) => Ok(()),
+        _ => Err(EncodeError::InvalidValue("status_epoch")),
+    }
+}
+
+fn validate_catalog(catalog: &PresetCatalogResponse) -> Result<(), EncodeError> {
+    validate_safe(catalog.revision, "catalog_revision")?;
+    if catalog.entries.len() < 5 || catalog.entries.len() > MAX_TOTAL_PRESETS {
+        return Err(EncodeError::InvalidValue("catalog_entries"));
+    }
+    let mut custom_seen = false;
+    let mut built_in_count = 0;
+    for (index, entry) in catalog.entries.iter().enumerate() {
+        validate_preset(&entry.preset)?;
+        if entry.built_in {
+            if custom_seen {
+                return Err(EncodeError::InvalidValue("built_in"));
+            }
+            built_in_count += 1;
+        } else {
+            custom_seen = true;
+            validate_custom_preset(&entry.preset)?;
+        }
+        if catalog.entries[..index]
+            .iter()
+            .any(|candidate| candidate.preset.id == entry.preset.id)
+        {
+            return Err(EncodeError::InvalidValue("preset_id"));
+        }
+    }
+    if built_in_count != 5 || catalog.entries.len() - built_in_count > MAX_CUSTOM_PRESETS {
+        return Err(EncodeError::InvalidValue("built_in"));
+    }
+    Ok(())
+}
+
+fn validate_catalog_proposal(proposal: &ProposePresetCatalogRequest) -> Result<(), EncodeError> {
+    validate_safe(proposal.expected_revision, "expected_revision")?;
+    validate_nonzero_id(proposal.proposal_id, "proposal_id")?;
+    for (index, preset) in proposal.custom_entries.iter().enumerate() {
+        validate_custom_preset(preset)?;
+        if BUILT_IN_PRESET_IDS.contains(&preset.id.as_str()) {
+            return Err(EncodeError::InvalidValue("preset_id"));
+        }
+        if proposal.custom_entries[..index]
+            .iter()
+            .any(|candidate| candidate.id == preset.id)
+        {
+            return Err(EncodeError::InvalidValue("preset_id"));
+        }
+    }
+    Ok(())
+}
+
+fn validate_custom_preset(preset: &PresetSnapshot) -> Result<(), EncodeError> {
+    validate_preset(preset)?;
+    if preset.planned_duration_ms < 60_000
+        || preset.planned_duration_ms > 43_200_000
+        || preset.planned_duration_ms % 60_000 != 0
+    {
+        return Err(EncodeError::InvalidValue("planned_duration_ms"));
+    }
+    Ok(())
+}
+
+fn validate_catalog_result(result: PresetCatalogResultEvent) -> Result<(), EncodeError> {
+    validate_nonzero_id(result.proposal_id, "proposal_id")?;
+    match (result.result, result.catalog_revision) {
+        (CatalogResult::Committed, Some(revision)) if revision != 0 => {
+            validate_safe(revision, "catalog_revision")
+        }
+        (_, None) => Ok(()),
+        (CatalogResult::Committed, _) | (_, Some(_)) => {
+            Err(EncodeError::InvalidValue("catalog_revision"))
+        }
+    }
+}
+
+fn validate_nonzero_id(value: u32, field: &'static str) -> Result<(), EncodeError> {
+    if value == 0 {
+        return Err(EncodeError::InvalidValue(field));
+    }
+    Ok(())
 }
 
 fn validate_preset(preset: &PresetSnapshot) -> Result<(), EncodeError> {
@@ -1092,12 +1548,16 @@ impl<'a> Decoder<'a> {
     }
 
     fn array_len(&mut self) -> Result<usize, DecodeError> {
+        self.array_len_bounded(MAX_ARRAY_ITEMS)
+    }
+
+    fn array_len_bounded(&mut self, maximum: usize) -> Result<usize, DecodeError> {
         let (major, value) = self.head()?;
         if major != 4 {
             return Err(DecodeError::UnexpectedType);
         }
         let len = usize::try_from(value).map_err(|_| DecodeError::LimitExceeded)?;
-        if len > MAX_ARRAY_ITEMS {
+        if len > maximum {
             return Err(DecodeError::LimitExceeded);
         }
         Ok(len)

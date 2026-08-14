@@ -29,6 +29,7 @@ export default function RootLayout() {
               <Stack.Screen name="index" />
               <Stack.Screen name="device" />
               <Stack.Screen name="history" />
+              <Stack.Screen name="presets" />
             </Stack>
           </View>
         </View>

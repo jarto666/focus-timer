@@ -1,9 +1,11 @@
 export const PROTOCOL_MAJOR = 1 as const;
-export const PROTOCOL_MINOR = 0 as const;
+export const PROTOCOL_MINOR = 1 as const;
 
 export const MAX_LOGICAL_MESSAGE_BYTES = 2_048;
 export const MAX_RECORDS_PER_PAGE = 8;
 export const MAX_CAPABILITIES = 8;
+export const MAX_CUSTOM_PRESETS = 8;
+export const MAX_TOTAL_PRESETS = 13;
 export const MAX_PRODUCT_NAME_BYTES = 24;
 export const MAX_FIRMWARE_VERSION_BYTES = 32;
 export const MAX_PRESET_ID_BYTES = 32;
@@ -24,6 +26,9 @@ export enum Capability {
   ReadStatus = 1,
   ReadSessionPages = 2,
   SetClockAnchor = 3,
+  LiveStatus = 4,
+  ReadPresetCatalog = 5,
+  ProposePresetCatalog = 6,
 }
 
 export enum ViewState {
@@ -55,6 +60,7 @@ export enum ProtocolErrorCode {
   Busy = 8,
   JournalUnavailable = 9,
   InternalError = 10,
+  CatalogConflict = 11,
 }
 
 export interface PresetSnapshot {
@@ -84,6 +90,42 @@ export interface StatusResponse {
   readonly remainingDurationMs: number;
   readonly journal: JournalStatus;
   readonly clockKnown: boolean;
+  readonly statusEpoch?: Uint8Array;
+  readonly statusRevision?: number;
+}
+
+export interface CatalogEntry extends PresetSnapshot {
+  readonly builtIn: boolean;
+}
+
+export interface PresetCatalogResponse {
+  readonly revision: number;
+  readonly entries: readonly CatalogEntry[];
+}
+
+export interface ProposePresetCatalogRequest {
+  readonly expectedRevision: number;
+  readonly proposalId: number;
+  readonly customEntries: readonly PresetSnapshot[];
+}
+
+export interface ProposePresetCatalogResponse {
+  readonly proposalId: number;
+  readonly expiresInMs: number;
+}
+
+export enum CatalogResult {
+  Committed = 0,
+  Rejected = 1,
+  Expired = 2,
+  Cancelled = 3,
+  StorageFailed = 4,
+}
+
+export interface PresetCatalogResultEvent {
+  readonly proposalId: number;
+  readonly result: CatalogResult;
+  readonly catalogRevision?: number;
 }
 
 export interface SessionPageRequest {
@@ -132,6 +174,8 @@ export type Request =
   | { readonly type: 'getStatus' }
   | { readonly type: 'getSessionPage'; readonly page: SessionPageRequest }
   | { readonly type: 'setClockAnchor'; readonly anchor: ClockAnchorRequest }
+  | { readonly type: 'getPresetCatalog' }
+  | { readonly type: 'proposePresetCatalog'; readonly proposal: ProposePresetCatalogRequest }
   | { readonly type: 'unknown'; readonly messageKind: number };
 
 export type Response =
@@ -139,7 +183,16 @@ export type Response =
   | { readonly type: 'status'; readonly status: StatusResponse }
   | { readonly type: 'sessionPage'; readonly page: SessionPageResponse }
   | { readonly type: 'clockAnchor'; readonly anchor: ClockAnchorResponse }
+  | { readonly type: 'presetCatalog'; readonly catalog: PresetCatalogResponse }
+  | {
+      readonly type: 'proposePresetCatalog';
+      readonly proposal: ProposePresetCatalogResponse;
+    }
   | { readonly type: 'error'; readonly error: ErrorResponse };
+
+export type DeviceEvent =
+  | { readonly type: 'liveStatus'; readonly status: StatusResponse }
+  | { readonly type: 'presetCatalogResult'; readonly result: PresetCatalogResultEvent };
 
 export interface RequestEnvelope {
   readonly version: ProtocolVersion;
@@ -151,4 +204,9 @@ export interface ResponseEnvelope {
   readonly version: ProtocolVersion;
   readonly requestId: number;
   readonly response: Response;
+}
+
+export interface EventEnvelope {
+  readonly version: ProtocolVersion;
+  readonly event: DeviceEvent;
 }

@@ -1,15 +1,11 @@
-use focus_core::{App, AppSnapshot, Catalog, DEFAULT_PRESETS, InputEvent, SettingsLoad, ViewState};
+use focus_core::{App, AppSnapshot, InputEvent, SettingsLoad, ViewState, default_catalog};
 use focus_firmware::presentation::{
     OLED_HEIGHT, OLED_LAYOUT, OLED_WIDTH, RING_CHANNEL_LIMIT, RING_PIXELS, Rgb, RingFrame,
-    RingSink, oled_view, render_ring, ring_frame,
+    RingSink, catalog_confirmation_view, oled_view, render_ring, ring_frame,
 };
 
 fn boot() -> App {
-    App::boot(
-        Catalog::new(&DEFAULT_PRESETS, 2).unwrap(),
-        SettingsLoad::Missing,
-    )
-    .0
+    App::boot(default_catalog(), SettingsLoad::Missing).0
 }
 
 #[test]
@@ -52,12 +48,22 @@ fn oled_models_make_all_states_unambiguous() {
 }
 
 #[test]
+fn catalog_confirmation_is_unambiguous_and_bounded() {
+    let view = catalog_confirmation_view(8);
+    assert_eq!(view.state_label, "PHONE REQUEST");
+    assert_eq!(view.preset_name.as_str(), "8 custom presets");
+    assert_eq!(view.time.as_str(), "UPDATE?");
+    assert!(view.hint.contains("Press"));
+}
+
+#[test]
 fn running_ring_shows_bounded_progress() {
-    let preset = DEFAULT_PRESETS[2];
+    let preset = default_catalog().preset(2);
+    let remaining_ms = preset.duration_ms / 2;
     let frame = ring_frame(AppSnapshot {
         state: ViewState::Running,
         preset,
-        remaining_ms: preset.duration_ms / 2,
+        remaining_ms,
     });
 
     assert_eq!(
@@ -77,10 +83,10 @@ fn running_ring_shows_bounded_progress() {
 
 #[test]
 fn idle_paused_and_completed_ring_frames_are_distinct() {
-    let preset = DEFAULT_PRESETS[2];
+    let preset = default_catalog().preset(2);
     let snapshot = |state| AppSnapshot {
         state,
-        preset,
+        preset: preset.clone(),
         remaining_ms: preset.duration_ms,
     };
 
@@ -116,7 +122,7 @@ fn ring_failure_cannot_stop_timer_or_oled_mapping() {
     app.handle(0, InputEvent::Press);
     let initial = app.snapshot(0);
     assert_eq!(
-        render_ring(&mut Disconnected, initial),
+        render_ring(&mut Disconnected, initial.clone()),
         Err("ring disconnected")
     );
 

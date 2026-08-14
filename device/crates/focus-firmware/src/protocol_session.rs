@@ -1,8 +1,8 @@
 //! Pure protocol-handshake state kept outside BLE callbacks and timer state.
 
 use focus_protocol::{
-    ErrorCode, ErrorResponse, HelloResponse, ProtocolVersion, Request, RequestEnvelope, Response,
-    ResponseEnvelope, SessionPageRequest,
+    ErrorCode, ErrorResponse, HelloResponse, ProposePresetCatalogRequest, ProtocolVersion, Request,
+    RequestEnvelope, Response, ResponseEnvelope, SessionPageRequest,
 };
 
 /// Work that the single-owner firmware loop must execute for one valid request.
@@ -25,6 +25,15 @@ pub enum ProtocolAction {
         request_id: u32,
         version: ProtocolVersion,
         utc_ms: u64,
+    },
+    ReadPresetCatalog {
+        request_id: u32,
+        version: ProtocolVersion,
+    },
+    ProposePresetCatalog {
+        request_id: u32,
+        version: ProtocolVersion,
+        proposal: ProposePresetCatalogRequest,
     },
 }
 
@@ -75,13 +84,24 @@ impl ProtocolSession {
         if matches!(envelope.request, Request::Hello) {
             let version = ProtocolVersion {
                 major: ProtocolVersion::CURRENT.major,
-                minor: ProtocolVersion::CURRENT.minor,
+                minor: envelope.version.minor.min(ProtocolVersion::CURRENT.minor),
             };
             self.negotiated_version = Some(version);
+            let mut hello = self.hello.clone();
+            if version.minor == 0 {
+                hello.capabilities.retain(|capability| {
+                    matches!(
+                        capability,
+                        focus_protocol::Capability::ReadStatus
+                            | focus_protocol::Capability::ReadSessionPages
+                            | focus_protocol::Capability::SetClockAnchor
+                    )
+                });
+            }
             return ProtocolAction::Respond(ResponseEnvelope {
                 version,
                 request_id: envelope.request_id,
-                response: Response::Hello(self.hello.clone()),
+                response: Response::Hello(hello),
             });
         }
 
@@ -123,6 +143,15 @@ impl ProtocolSession {
                 request_id: envelope.request_id,
                 version,
                 utc_ms: anchor.utc_ms,
+            },
+            Request::GetPresetCatalog => ProtocolAction::ReadPresetCatalog {
+                request_id: envelope.request_id,
+                version,
+            },
+            Request::ProposePresetCatalog(proposal) => ProtocolAction::ProposePresetCatalog {
+                request_id: envelope.request_id,
+                version,
+                proposal: proposal.clone(),
             },
             Request::Unknown { message_kind } => Self::error(
                 envelope.request_id,

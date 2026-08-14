@@ -58,6 +58,10 @@ class EchoTransport implements DeviceTransport {
     return payload.slice();
   }
 
+  subscribeToEvents() {
+    return () => undefined;
+  }
+
   subscribeToDisconnect(listener: (event: DeviceTransportDisconnect) => void) {
     this.disconnectListeners.add(listener);
     return () => this.disconnectListeners.delete(listener);

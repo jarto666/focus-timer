@@ -9,6 +9,7 @@ pub mod buzzer;
 pub mod input;
 pub mod journal_adapter;
 pub mod presentation;
+pub mod preset_storage;
 pub mod protocol_projection;
 pub mod protocol_session;
 pub mod settings;

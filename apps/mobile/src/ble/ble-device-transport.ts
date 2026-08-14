@@ -28,6 +28,7 @@ import { base64ToBytes, bytesToBase64 } from './base64';
 export const FOCUS_TIMER_SERVICE_UUID = '1cf47046-2e37-4642-a30e-df24879f994f';
 export const FOCUS_TIMER_COMMAND_UUID = '65ecdf0d-cde0-4543-a62b-c166c3341319';
 export const FOCUS_TIMER_RESPONSE_UUID = '2c4e304b-2581-481a-8646-89122d760711';
+export const FOCUS_TIMER_EVENT_UUID = '7b6786bb-0304-4fc2-87a8-a9e8e4c4f13b';
 
 const FALLBACK_GATT_VALUE_BYTES = 20;
 const MAXIMUM_GATT_VALUE_BYTES = 182;
@@ -75,6 +76,9 @@ export class BleDeviceTransport implements DeviceTransport {
 
   private connected: Device | null = null;
   private disconnectSubscription: Subscription | null = null;
+  private eventSubscription: Subscription | null = null;
+  private eventTransactionId: string | null = null;
+  private eventCharacteristicAvailable = false;
   private explicitDisconnect = false;
   private nextRequestTransferId = 0;
   private requestInFlight = false;
@@ -193,6 +197,9 @@ export class BleDeviceTransport implements DeviceTransport {
       const response = characteristics.find(
         ({ uuid }) => uuid.toLowerCase() === FOCUS_TIMER_RESPONSE_UUID,
       );
+      const event = characteristics.find(
+        ({ uuid }) => uuid.toLowerCase() === FOCUS_TIMER_EVENT_UUID,
+      );
       if (command?.isWritableWithResponse !== true) {
         throw transportError(
           'connect-failed',
@@ -207,6 +214,8 @@ export class BleDeviceTransport implements DeviceTransport {
           'Focus Timer response characteristic is missing or not notifiable',
         );
       }
+      this.eventCharacteristicAvailable =
+        event !== undefined && (event.isNotifiable || event.isIndicatable);
 
       this.connected = discovered;
       this.installDisconnectMonitor(discovered);
@@ -227,6 +236,8 @@ export class BleDeviceTransport implements DeviceTransport {
     );
     this.disconnectSubscription?.remove();
     this.disconnectSubscription = null;
+    this.clearEventSubscription();
+    this.eventCharacteristicAvailable = false;
     if (connected === null) return;
 
     this.explicitDisconnect = true;
@@ -354,6 +365,54 @@ export class BleDeviceTransport implements DeviceTransport {
         void this.manager.cancelTransaction(writeId).catch(() => undefined);
       }
     }
+  }
+
+  subscribeToEvents(
+    listener: (payload: Uint8Array) => void,
+    onError: (error: DeviceTransportError) => void,
+  ): () => void {
+    const connected = this.connected;
+    if (connected === null) {
+      throw transportError('not-connected', true, 'Connect before subscribing to timer events');
+    }
+    if (!this.eventCharacteristicAvailable) {
+      throw transportError(
+        'transport-failed',
+        false,
+        'Focus Timer event characteristic is unavailable',
+      );
+    }
+    this.clearEventSubscription();
+    const reassembler = new BleReassembler();
+    const transactionId = `focus-events-${++this.transactionSequence}`;
+    this.eventTransactionId = transactionId;
+    const subscription = connected.monitorCharacteristicForService(
+      FOCUS_TIMER_SERVICE_UUID,
+      FOCUS_TIMER_EVENT_UUID,
+      (error, characteristic) => {
+        if (error !== null) {
+          reassembler.reset();
+          onError(transportError('transport-failed', true, 'Timer event stream failed', error));
+          return;
+        }
+        if (characteristic?.value === null || characteristic?.value === undefined) {
+          onError(transportError('transport-failed', true, 'Timer sent an empty event frame'));
+          return;
+        }
+        try {
+          const result = reassembler.acceptFrame(base64ToBytes(characteristic.value), Date.now());
+          if (result.status === 'complete') listener(result.message);
+        } catch (cause) {
+          reassembler.reset();
+          onError(transportError('transport-failed', true, 'Timer sent a malformed event', cause));
+        }
+      },
+      transactionId,
+    );
+    this.eventSubscription = subscription;
+    return () => {
+      if (this.eventSubscription === subscription) this.clearEventSubscription();
+    };
   }
 
   /** Sends one deliberately invalid GATT frame for an explicit bench run. */
@@ -529,6 +588,7 @@ export class BleDeviceTransport implements DeviceTransport {
     this.disconnectSubscription = this.manager.onDeviceDisconnected(device.id, (error) => {
       if (this.explicitDisconnect) return;
       this.connected = null;
+      this.clearEventSubscription();
       const requestError = transportError(
         'connection-lost',
         true,
@@ -547,6 +607,15 @@ export class BleDeviceTransport implements DeviceTransport {
   private rejectActiveRequest(error: DeviceTransportError): void {
     this.rejectInFlight?.(error);
     this.rejectInFlight = null;
+  }
+
+  private clearEventSubscription(): void {
+    this.eventSubscription?.remove();
+    this.eventSubscription = null;
+    if (this.eventTransactionId !== null) {
+      void this.manager.cancelTransaction(this.eventTransactionId).catch(() => undefined);
+      this.eventTransactionId = null;
+    }
   }
 
   private assertOperation(

@@ -31,6 +31,8 @@ export class MockDeviceTransport implements DeviceTransport {
   private requestNumber = 0;
   private readonly availabilityListeners = new Set<(state: DeviceTransportAvailability) => void>();
   private readonly disconnectListeners = new Set<(event: DeviceTransportDisconnect) => void>();
+  private eventListener: ((payload: Uint8Array) => void) | null = null;
+  private eventErrorListener: ((error: DeviceTransportError) => void) | null = null;
 
   constructor(
     scenario: MockScenario | MockScenarioId,
@@ -64,6 +66,8 @@ export class MockDeviceTransport implements DeviceTransport {
 
   async disconnect() {
     this.connected = false;
+    this.eventListener = null;
+    this.eventErrorListener = null;
   }
 
   async request(payload: Uint8Array, operation: DeviceTransportOperation) {
@@ -98,6 +102,29 @@ export class MockDeviceTransport implements DeviceTransport {
     return response.slice();
   }
 
+  subscribeToEvents(
+    listener: (payload: Uint8Array) => void,
+    onError: (error: DeviceTransportError) => void,
+  ) {
+    if (!this.connected) {
+      throw new DeviceTransportError('not-connected', true, 'Connect before subscribing');
+    }
+    this.eventListener = listener;
+    this.eventErrorListener = onError;
+    return () => {
+      if (this.eventListener === listener) this.eventListener = null;
+      if (this.eventErrorListener === onError) this.eventErrorListener = null;
+    };
+  }
+
+  emitEvent(payload: Uint8Array) {
+    if (this.connected) this.eventListener?.(payload.slice());
+  }
+
+  emitEventError(message = 'Mock event stream failed') {
+    this.eventErrorListener?.(new DeviceTransportError('transport-failed', true, message));
+  }
+
   subscribeToDisconnect(listener: (event: DeviceTransportDisconnect) => void) {
     this.disconnectListeners.add(listener);
     return () => {
@@ -119,6 +146,8 @@ export class MockDeviceTransport implements DeviceTransport {
     }
 
     this.connected = false;
+    this.eventListener = null;
+    this.eventErrorListener = null;
     const event: DeviceTransportDisconnect = { reason: 'link-loss', message };
     for (const listener of this.disconnectListeners) {
       listener(event);

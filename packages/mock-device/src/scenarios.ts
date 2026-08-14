@@ -64,7 +64,7 @@ const compatibleDevice: ReadyDevice = {
   transportId: candidate.transportId,
   productName: candidate.productName,
   firmwareVersion: '0.1.0-mock',
-  protocolVersion: { major: 1, minor: 0 },
+  protocolVersion: { major: 1, minor: 1 },
 };
 
 function sessionRecord(sequence: number): MockSessionRecord {

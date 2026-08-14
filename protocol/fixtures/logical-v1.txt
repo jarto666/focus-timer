@@ -1,5 +1,5 @@
-# Focus Timer protocol 1.0 canonical logical-message fixtures.
-# Append-only compatibility artifact: <name> <request|response> <lowercase hex>.
+# Focus Timer protocol 1.x canonical logical-message fixtures.
+# Append-only compatibility artifact: <name> <request|response|event> <lowercase hex>.
 hello-request-min request a5000101000201030104a0
 hello-response-full response a5000101000201030204a60050000102030405060708090a0b0c0d0e0f016b466f6375732054696d65720265302e312e30030104000583010203
 status-request-max-id request a500010100021affffffff030304a0
@@ -13,3 +13,8 @@ clock-anchor-request-max request a5000101000208030704a1001b001fffffffffffff
 clock-anchor-response-edges response a5000101000208030804a20000011b001fffffffffffff
 error-response-version response a50001010002090318ff04a40002010103010400
 error-response-field response a500010100020a0318ff04a3000501050202
+catalog-request-v11 request a500010101020b030904a0
+catalog-proposal-v11 request a500010101020c030b04a300070118630281a3006777726974696e67016757726974696e67021a002932e0
+catalog-staged-v11 response a500010101020c030c04a200186301193a98
+live-status-v11 event a5000101010200030d04a7000101a30068706f6d6f646f726f0168506f6d6f646f726f021a0016e360021a0012d45003a40048333333333333333301050213030004f505485555555555555555061829
+catalog-result-v11 event a5000101010200030e04a300186301000208

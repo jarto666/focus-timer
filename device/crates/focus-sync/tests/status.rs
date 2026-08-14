@@ -1,11 +1,10 @@
-use focus_core::{App, Catalog, DEFAULT_PRESETS, SettingsLoad, ViewState};
+use focus_core::{App, SettingsLoad, ViewState, default_catalog};
 use focus_sync::{JournalHealth, JournalStatus, VolatileClock, project_status};
 
 const EPOCH: [u8; 8] = [0x22; 8];
 
 fn app() -> App {
-    let catalog = Catalog::new(&DEFAULT_PRESETS, 2).unwrap();
-    App::boot(catalog, SettingsLoad::Missing).0
+    App::boot(default_catalog(), SettingsLoad::Missing).0
 }
 
 #[test]

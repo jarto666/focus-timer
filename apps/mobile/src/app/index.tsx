@@ -1,5 +1,6 @@
 import { Link } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
+import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import type { DeviceConnectionState } from '@focus-timer/device-client';
 
@@ -124,10 +125,26 @@ function connectionCopy(connection: DeviceConnectionState) {
 }
 
 export default function HomeScreen() {
-  const { connection, history, status } = useCompanionRuntime();
+  const { connection, history, status, presetCatalog, presetSync } = useCompanionRuntime();
+  const [nowMs, setNowMs] = useState(0);
+  useEffect(() => {
+    if (status?.viewState !== 'running' || status.freshness !== 'live') return;
+    const timer = setInterval(() => setNowMs(Date.now()), 250);
+    return () => clearInterval(timer);
+  }, [status?.freshness, status?.observedAtMs, status?.viewState]);
   const copy = connectionCopy(connection);
   const ready = connection.phase === 'ready';
   const dialLabel = status?.viewState.toUpperCase() ?? copy.dial;
+  const displayedRemaining =
+    status === null
+      ? null
+      : Math.max(
+          0,
+          status.remainingDurationMs -
+            (status.viewState === 'running' && status.freshness === 'live'
+              ? Math.max(0, nowMs - status.observedAtMs)
+              : 0),
+        );
   const entryCount = String(history.entries.length).padStart(2, '0');
 
   return (
@@ -145,12 +162,25 @@ export default function HomeScreen() {
           <View>
             <Text style={styles.deviceName}>Focus Timer</Text>
             <Text style={styles.deviceMeta}>
-              {ready ? 'Read-only device state' : 'No active device link'}
+              {status?.freshness === 'stale'
+                ? 'Last known device state'
+                : ready
+                  ? (status?.presetName ?? 'Live device state')
+                  : 'No active device link'}
             </Text>
           </View>
           <View style={styles.statusBadge}>
-            <View style={[styles.offlineDot, ready && styles.readyDot]} />
-            <Text style={[styles.statusLabel, ready && styles.readyStatusLabel]}>{copy.badge}</Text>
+            <View
+              style={[styles.offlineDot, ready && status?.freshness === 'live' && styles.readyDot]}
+            />
+            <Text
+              style={[
+                styles.statusLabel,
+                ready && status?.freshness === 'live' && styles.readyStatusLabel,
+              ]}
+            >
+              {status?.freshness === 'stale' ? 'STALE' : copy.badge}
+            </Text>
           </View>
         </View>
 
@@ -159,7 +189,7 @@ export default function HomeScreen() {
           accessibilityLabel={
             status === null
               ? `Timer ${dialLabel.toLowerCase()}`
-              : `${status.presetName}, ${formatTimer(status.remainingDurationMs)} remaining`
+              : `${status.presetName}, ${formatTimer(displayedRemaining ?? 0)} remaining`
           }
           style={styles.dialStage}
         >
@@ -172,7 +202,7 @@ export default function HomeScreen() {
             <View style={styles.innerDial}>
               <Sigil name="time" size={28} />
               <Text style={styles.time}>
-                {status === null ? '--:--' : formatTimer(status.remainingDurationMs)}
+                {displayedRemaining === null ? '--:--' : formatTimer(displayedRemaining)}
               </Text>
               <Text style={styles.dialLabel}>{dialLabel}</Text>
             </View>
@@ -184,9 +214,11 @@ export default function HomeScreen() {
             <View style={styles.footerGlyphCore} />
           </View>
           <Text style={styles.panelMessage}>
-            {ready
-              ? 'Status is read-only. Sessions still start, pause, and finish on the physical timer.'
-              : 'Pair your physical timer to sync sessions and see its live state.'}
+            {status?.freshness === 'stale'
+              ? 'The link is quiet. This snapshot is frozen until the timer reconnects.'
+              : ready
+                ? 'Turn or press the physical knob — Muninn follows the timer live.'
+                : 'Pair your physical timer to sync sessions and see its live state.'}
           </Text>
         </View>
       </View>
@@ -207,6 +239,23 @@ export default function HomeScreen() {
             tintColor={color.background}
             weight="semibold"
           />
+        </Pressable>
+      </Link>
+
+      <Link asChild href="/presets">
+        <Pressable accessibilityRole="button" style={styles.presetDoor}>
+          <View style={styles.presetRune}>
+            <Sigil name="norns" size={30} />
+          </View>
+          <View style={styles.pairCopy}>
+            <Text style={styles.presetTitle}>Ritual catalog</Text>
+            <Text style={styles.presetDetail}>
+              {presetCatalog === null
+                ? 'Built-ins and custom focus presets'
+                : `${presetCatalog.builtIns.length} carved · ${presetCatalog.draft.length} yours · ${presetSync.replaceAll('-', ' ')}`}
+            </Text>
+          </View>
+          <Text style={styles.presetChevron}>›</Text>
         </Pressable>
       </Link>
 
@@ -475,6 +524,29 @@ const styles = StyleSheet.create({
     color: color.background,
     fontSize: 22,
   },
+  presetDoor: {
+    alignItems: 'center',
+    backgroundColor: color.backgroundLifted,
+    borderColor: color.lineBright,
+    borderRadius: radius.card,
+    borderWidth: 1,
+    flexDirection: 'row',
+    marginTop: space.sm,
+    minHeight: 72,
+    paddingHorizontal: space.md,
+  },
+  presetRune: {
+    alignItems: 'center',
+    backgroundColor: color.accentWash,
+    borderRadius: 10,
+    height: 42,
+    justifyContent: 'center',
+    marginRight: 12,
+    width: 42,
+  },
+  presetTitle: { color: color.text, fontSize: 15, fontWeight: '800' },
+  presetDetail: { color: color.mutedText, fontSize: 11, marginTop: 4 },
+  presetChevron: { color: color.accent, fontSize: 23 },
   ledger: {
     backgroundColor: color.surface,
     borderColor: color.line,

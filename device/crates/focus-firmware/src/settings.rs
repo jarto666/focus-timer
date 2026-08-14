@@ -81,13 +81,13 @@ pub enum QueueOutcome {
     AlreadyPersisted,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum FlushOutcome {
     NotDue,
     Saved(PresetId),
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct PendingSelection {
     id: PresetId,
     due_ms: u64,
@@ -147,12 +147,17 @@ impl SelectionPersistence {
         now_ms: u64,
         store: &mut S,
     ) -> Result<FlushOutcome, FlushError<S::Error>> {
-        let Some(pending) = self.pending.filter(|pending| now_ms >= pending.due_ms) else {
+        let Some(pending) = self
+            .pending
+            .as_ref()
+            .filter(|pending| now_ms >= pending.due_ms)
+            .cloned()
+        else {
             return Ok(FlushOutcome::NotDue);
         };
         self.pending = None;
 
-        let record = encode_record(pending.id).map_err(FlushError::Encode)?;
+        let record = encode_record(&pending.id).map_err(FlushError::Encode)?;
         store
             .write(record.as_slice())
             .map_err(FlushError::Storage)?;
@@ -181,7 +186,7 @@ pub fn load_settings<S: SettingsStore>(
         .map_err(LoadError::Decode)
 }
 
-fn encode_record(id: PresetId) -> Result<Vec<u8, SETTINGS_RECORD_MAX_BYTES>, EncodeError> {
+fn encode_record(id: &PresetId) -> Result<Vec<u8, SETTINGS_RECORD_MAX_BYTES>, EncodeError> {
     let id_bytes = id.as_str().as_bytes();
     let id_length = u8::try_from(id_bytes.len()).map_err(|_| EncodeError::PresetIdTooLong)?;
     if id_bytes.len() > MAX_PRESET_ID_BYTES {

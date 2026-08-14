@@ -1,10 +1,12 @@
 use focus_protocol::{
-    Capability, ClockAnchorRequest, ClockAnchorResponse, DecodeError, EncodeError, ErrorCode,
-    ErrorResponse, FirmwareVersion, HelloResponse, JournalHealth, JournalStatus,
-    MAX_LOGICAL_MESSAGE_BYTES, MAX_RECORDS_PER_PAGE, PresetId, PresetName, PresetSnapshot,
-    ProductName, ProtocolVersion, Request, RequestEnvelope, Response, ResponseEnvelope,
-    SessionOutcome, SessionPageRequest, SessionPageResponse, SessionRecord, StatusResponse,
-    ViewState, decode_request, decode_response, encode_request, encode_response,
+    Capability, CatalogEntry, CatalogResult, ClockAnchorRequest, ClockAnchorResponse, DecodeError,
+    DeviceEvent, EncodeError, ErrorCode, ErrorResponse, EventEnvelope, FirmwareVersion,
+    HelloResponse, JournalHealth, JournalStatus, MAX_LOGICAL_MESSAGE_BYTES, MAX_RECORDS_PER_PAGE,
+    PresetCatalogResponse, PresetCatalogResultEvent, PresetId, PresetName, PresetSnapshot,
+    ProductName, ProposePresetCatalogRequest, ProposePresetCatalogResponse, ProtocolVersion,
+    Request, RequestEnvelope, Response, ResponseEnvelope, SessionOutcome, SessionPageRequest,
+    SessionPageResponse, SessionRecord, StatusResponse, ViewState, decode_event, decode_request,
+    decode_response, encode_event, encode_request, encode_response,
 };
 use heapless::{String, Vec};
 
@@ -42,6 +44,53 @@ fn round_trip_response(response: Response) {
     assert_eq!(decode_response(&output[..len]), Ok(expected));
 }
 
+fn round_trip_event(event: DeviceEvent) {
+    let expected = EventEnvelope {
+        version: ProtocolVersion::CURRENT,
+        event,
+    };
+    let mut output = [0; MAX_LOGICAL_MESSAGE_BYTES];
+    let len = encode_event(&expected, &mut output).expect("event must encode");
+    assert_eq!(decode_event(&output[..len]), Ok(expected));
+}
+
+fn custom_preset(id: &str, name: &str, minutes: u32) -> PresetSnapshot {
+    PresetSnapshot {
+        id: PresetId::try_from(id).expect("preset ID must fit"),
+        name: PresetName::try_from(name).expect("preset name must fit"),
+        planned_duration_ms: minutes * 60_000,
+    }
+}
+
+fn catalog() -> PresetCatalogResponse {
+    let built_ins = [
+        ("deep-work", "Deep Work", 90),
+        ("focus", "Focus", 50),
+        ("pomodoro", "Pomodoro", 25),
+        ("reading", "Reading", 45),
+        ("quick-sprint", "Quick Sprint", 15),
+    ];
+    let mut entries = Vec::new();
+    for (id, name, minutes) in built_ins {
+        entries
+            .push(CatalogEntry {
+                preset: custom_preset(id, name, minutes),
+                built_in: true,
+            })
+            .expect("catalog must fit");
+    }
+    entries
+        .push(CatalogEntry {
+            preset: custom_preset("writing", "Writing", 45),
+            built_in: false,
+        })
+        .expect("catalog must fit");
+    PresetCatalogResponse {
+        revision: 7,
+        entries,
+    }
+}
+
 #[test]
 fn request_messages_round_trip() {
     round_trip_request(Request::Hello);
@@ -58,6 +107,16 @@ fn request_messages_round_trip() {
     }));
     round_trip_request(Request::SetClockAnchor(ClockAnchorRequest {
         utc_ms: 1_786_669_200_000,
+    }));
+    round_trip_request(Request::GetPresetCatalog);
+    let mut custom_entries = Vec::new();
+    custom_entries
+        .push(custom_preset("writing", "Writing", 45))
+        .expect("proposal must fit");
+    round_trip_request(Request::ProposePresetCatalog(ProposePresetCatalogRequest {
+        expected_revision: 7,
+        proposal_id: 99,
+        custom_entries,
     }));
     round_trip_request(Request::Unknown { message_kind: 200 });
 }
@@ -103,6 +162,8 @@ fn status_response_round_trips_with_empty_and_populated_bounds() {
             remaining_duration_ms: 840_000,
             journal,
             clock_known: true,
+            status_epoch: None,
+            status_revision: None,
         }));
     }
 }
@@ -163,9 +224,45 @@ fn clock_and_structured_error_responses_round_trip() {
 }
 
 #[test]
+fn catalog_responses_and_events_round_trip() {
+    round_trip_response(Response::PresetCatalog(catalog()));
+    round_trip_response(Response::ProposePresetCatalog(
+        ProposePresetCatalogResponse {
+            proposal_id: 99,
+            expires_in_ms: 15_000,
+        },
+    ));
+
+    round_trip_event(DeviceEvent::LiveStatus(StatusResponse {
+        view_state: ViewState::Running,
+        preset: preset(),
+        remaining_duration_ms: 1_234_000,
+        journal: JournalStatus {
+            epoch: [0x33; 8],
+            oldest_sequence: Some(5),
+            latest_sequence: Some(19),
+            health: JournalHealth::Healthy,
+        },
+        clock_known: true,
+        status_epoch: Some([0x55; 8]),
+        status_revision: Some(41),
+    }));
+    round_trip_event(DeviceEvent::PresetCatalogResult(PresetCatalogResultEvent {
+        proposal_id: 99,
+        result: CatalogResult::Committed,
+        catalog_revision: Some(8),
+    }));
+    round_trip_event(DeviceEvent::PresetCatalogResult(PresetCatalogResultEvent {
+        proposal_id: 100,
+        result: CatalogResult::Rejected,
+        catalog_revision: None,
+    }));
+}
+
+#[test]
 fn hello_request_has_explicit_canonical_bytes() {
     let request = RequestEnvelope {
-        version: ProtocolVersion::CURRENT,
+        version: ProtocolVersion { major: 1, minor: 0 },
         request_id: 7,
         request: Request::Hello,
     };
@@ -244,6 +341,79 @@ fn invalid_models_are_rejected_before_encoding() {
         encode_request(&zero_request, &mut output),
         Err(EncodeError::InvalidValue("request_id"))
     );
+
+    let invalid_event = EventEnvelope {
+        version: ProtocolVersion::CURRENT,
+        event: DeviceEvent::LiveStatus(StatusResponse {
+            view_state: ViewState::Idle,
+            preset: preset(),
+            remaining_duration_ms: 1_500_000,
+            journal: JournalStatus {
+                epoch: [1; 8],
+                oldest_sequence: None,
+                latest_sequence: None,
+                health: JournalHealth::Healthy,
+            },
+            clock_known: false,
+            status_epoch: None,
+            status_revision: None,
+        }),
+    };
+    assert_eq!(
+        encode_event(&invalid_event, &mut output),
+        Err(EncodeError::InvalidValue("status_epoch"))
+    );
+
+    let mut invalid_custom_entries = Vec::new();
+    invalid_custom_entries
+        .push(custom_preset("almost", "Almost", 1))
+        .expect("proposal must fit");
+    invalid_custom_entries[0].planned_duration_ms = 60_001;
+    let invalid_proposal = RequestEnvelope {
+        version: ProtocolVersion::CURRENT,
+        request_id: 1,
+        request: Request::ProposePresetCatalog(ProposePresetCatalogRequest {
+            expected_revision: 0,
+            proposal_id: 1,
+            custom_entries: invalid_custom_entries,
+        }),
+    };
+    assert_eq!(
+        encode_request(&invalid_proposal, &mut output),
+        Err(EncodeError::InvalidValue("planned_duration_ms"))
+    );
+}
+
+#[test]
+fn event_decoder_requires_minor_one_and_reserved_zero_request_id() {
+    let event = EventEnvelope {
+        version: ProtocolVersion::CURRENT,
+        event: DeviceEvent::PresetCatalogResult(PresetCatalogResultEvent {
+            proposal_id: 7,
+            result: CatalogResult::Expired,
+            catalog_revision: None,
+        }),
+    };
+    let mut output = [0; MAX_LOGICAL_MESSAGE_BYTES];
+    let len = encode_event(&event, &mut output).expect("event must encode");
+
+    let request_id_offset = output[..len]
+        .windows(4)
+        .position(|window| window == [0x01, 0x02, 0x00, 0x03])
+        .expect("canonical envelope prefix must contain request ID");
+    let request_id_byte = request_id_offset + 2;
+    output[request_id_byte] = 1;
+    assert_eq!(
+        decode_event(&output[..len]),
+        Err(DecodeError::InvalidValue(2))
+    );
+
+    output[request_id_byte] = 0;
+    output[4] = 0;
+    assert_eq!(
+        decode_event(&output[..len]),
+        Err(DecodeError::UnsupportedMessage(14))
+    );
 }
 
 #[test]
@@ -278,7 +448,7 @@ fn compatible_unknown_optional_field_is_validated_and_ignored() {
     assert_eq!(
         decode_request(&with_unknown_boolean),
         Ok(RequestEnvelope {
-            version: ProtocolVersion::CURRENT,
+            version: ProtocolVersion { major: 1, minor: 0 },
             request_id: 1,
             request: Request::Hello,
         })

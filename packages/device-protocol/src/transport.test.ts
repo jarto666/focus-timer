@@ -45,6 +45,36 @@ describe('BLE fragmentation transport', () => {
     }
   });
 
+  it('reassembles response and event streams independently', () => {
+    const response = frames(bytes('correlated response'), 21, BLE_FRAME_HEADER_BYTES + 4);
+    const event = frames(bytes('unsolicited event'), 22, BLE_FRAME_HEADER_BYTES + 3);
+    const responseChannel = new BleReassembler();
+    const eventChannel = new BleReassembler();
+    let responseResult;
+    let eventResult;
+    for (let index = 0; index < Math.max(response.length, event.length); index += 1) {
+      if (response[index] !== undefined)
+        responseResult = responseChannel.acceptFrame(response[index]!, index);
+      if (event[index] !== undefined) eventResult = eventChannel.acceptFrame(event[index]!, index);
+    }
+    expect(responseResult).toEqual({ status: 'complete', message: bytes('correlated response') });
+    expect(eventResult).toEqual({ status: 'complete', message: bytes('unsolicited event') });
+  });
+
+  it('recovers after a duplicate start frame', () => {
+    const source = frames(bytes('duplicate start transfer'), 31, BLE_FRAME_HEADER_BYTES + 4);
+    const reassembler = new BleReassembler();
+    expect(reassembler.acceptFrame(source[0]!, 0)).toEqual({ status: 'inProgress' });
+    expect(() => reassembler.acceptFrame(source[0]!, 1)).toThrowError(
+      expect.objectContaining({ code: 'duplicateStart' }),
+    );
+    const [retry] = frames(bytes('recovered'), 32, 64);
+    expect(reassembler.acceptFrame(retry!, 2)).toEqual({
+      status: 'complete',
+      message: bytes('recovered'),
+    });
+  });
+
   it('writes the correlated header in big-endian order', () => {
     const [frame] = frames(bytes('abc'), 0x1234, 64);
     expect(frame).toBeDefined();

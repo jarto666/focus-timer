@@ -1,13 +1,16 @@
 use focus_protocol::{
-    Capability, ClockAnchorRequest, ClockAnchorResponse, ErrorCode, ErrorResponse, FirmwareVersion,
-    HelloResponse, JournalHealth, JournalStatus, MAX_LOGICAL_MESSAGE_BYTES, PresetId, PresetName,
-    PresetSnapshot, ProductName, ProtocolVersion, Request, RequestEnvelope, Response,
-    ResponseEnvelope, SessionOutcome, SessionPageRequest, SessionPageResponse, SessionRecord,
-    StatusResponse, ViewState, decode_request, decode_response, encode_request, encode_response,
+    Capability, CatalogResult, ClockAnchorRequest, ClockAnchorResponse, DeviceEvent, ErrorCode,
+    ErrorResponse, EventEnvelope, FirmwareVersion, HelloResponse, JournalHealth, JournalStatus,
+    MAX_LOGICAL_MESSAGE_BYTES, PresetCatalogResultEvent, PresetId, PresetName, PresetSnapshot,
+    ProductName, ProposePresetCatalogRequest, ProposePresetCatalogResponse, ProtocolVersion,
+    Request, RequestEnvelope, Response, ResponseEnvelope, SessionOutcome, SessionPageRequest,
+    SessionPageResponse, SessionRecord, StatusResponse, ViewState, decode_event, decode_request,
+    decode_response, encode_event, encode_request, encode_response,
 };
 use heapless::Vec as HeaplessVec;
 
 const FIXTURES: &str = include_str!("../../../../protocol/fixtures/logical-v1.txt");
+const PROTOCOL_V1_0: ProtocolVersion = ProtocolVersion { major: 1, minor: 0 };
 
 fn fixture(name: &str, expected_direction: &str) -> Vec<u8> {
     let line = FIXTURES
@@ -29,7 +32,7 @@ fn fixture(name: &str, expected_direction: &str) -> Vec<u8> {
 
 fn assert_request(name: &str, request_id: u32, request: Request) {
     let expected = RequestEnvelope {
-        version: ProtocolVersion::CURRENT,
+        version: PROTOCOL_V1_0,
         request_id,
         request,
     };
@@ -42,7 +45,7 @@ fn assert_request(name: &str, request_id: u32, request: Request) {
 
 fn assert_response(name: &str, request_id: u32, response: Response) {
     let expected = ResponseEnvelope {
-        version: ProtocolVersion::CURRENT,
+        version: PROTOCOL_V1_0,
         request_id,
         response,
     };
@@ -51,6 +54,18 @@ fn assert_response(name: &str, request_id: u32, response: Response) {
     let length = encode_response(&expected, &mut output).expect("fixture response must encode");
     assert_eq!(&output[..length], fixture);
     assert_eq!(decode_response(&fixture), Ok(expected));
+}
+
+fn assert_event(name: &str, event: DeviceEvent) {
+    let expected = EventEnvelope {
+        version: ProtocolVersion::CURRENT,
+        event,
+    };
+    let fixture = fixture(name, "event");
+    let mut output = [0; MAX_LOGICAL_MESSAGE_BYTES];
+    let length = encode_event(&expected, &mut output).expect("fixture event must encode");
+    assert_eq!(&output[..length], fixture);
+    assert_eq!(decode_event(&fixture), Ok(expected));
 }
 
 fn preset() -> PresetSnapshot {
@@ -121,7 +136,7 @@ fn response_fixtures_are_byte_identical_and_historically_decodable() {
             ],
             product_name: ProductName::try_from("Focus Timer").expect("product name must fit"),
             firmware_version: FirmwareVersion::try_from("0.1.0").expect("version must fit"),
-            supported_version: ProtocolVersion::CURRENT,
+            supported_version: PROTOCOL_V1_0,
             capabilities,
         }),
     );
@@ -139,6 +154,8 @@ fn response_fixtures_are_byte_identical_and_historically_decodable() {
                 health: JournalHealth::Healthy,
             },
             clock_known: false,
+            status_epoch: None,
+            status_revision: None,
         }),
     );
     assert_response(
@@ -155,6 +172,8 @@ fn response_fixtures_are_byte_identical_and_historically_decodable() {
                 health: JournalHealth::Degraded,
             },
             clock_known: true,
+            status_epoch: None,
+            status_revision: None,
         }),
     );
 }
@@ -226,7 +245,7 @@ fn page_clock_and_error_fixtures_are_byte_identical_and_historically_decodable()
             code: ErrorCode::UnsupportedProtocolVersion,
             failed_message_kind: Some(1),
             field_id: None,
-            supported_version: Some(ProtocolVersion::CURRENT),
+            supported_version: Some(PROTOCOL_V1_0),
         }),
     );
     assert_response(
@@ -237,6 +256,81 @@ fn page_clock_and_error_fixtures_are_byte_identical_and_historically_decodable()
             failed_message_kind: Some(5),
             field_id: Some(2),
             supported_version: None,
+        }),
+    );
+}
+
+#[test]
+fn protocol_1_1_fixtures_are_byte_identical() {
+    let mut custom_entries = HeaplessVec::new();
+    custom_entries
+        .push(PresetSnapshot {
+            id: PresetId::try_from("writing").expect("preset ID must fit"),
+            name: PresetName::try_from("Writing").expect("preset name must fit"),
+            planned_duration_ms: 2_700_000,
+        })
+        .expect("proposal must fit");
+    let expected = RequestEnvelope {
+        version: ProtocolVersion::CURRENT,
+        request_id: 11,
+        request: Request::GetPresetCatalog,
+    };
+    let bytes = fixture("catalog-request-v11", "request");
+    let mut output = [0; MAX_LOGICAL_MESSAGE_BYTES];
+    let length = encode_request(&expected, &mut output).expect("fixture must encode");
+    assert_eq!(&output[..length], bytes);
+    assert_eq!(decode_request(&bytes), Ok(expected));
+
+    let expected = RequestEnvelope {
+        version: ProtocolVersion::CURRENT,
+        request_id: 12,
+        request: Request::ProposePresetCatalog(ProposePresetCatalogRequest {
+            expected_revision: 7,
+            proposal_id: 99,
+            custom_entries,
+        }),
+    };
+    let bytes = fixture("catalog-proposal-v11", "request");
+    let length = encode_request(&expected, &mut output).expect("fixture must encode");
+    assert_eq!(&output[..length], bytes);
+    assert_eq!(decode_request(&bytes), Ok(expected));
+
+    let expected = ResponseEnvelope {
+        version: ProtocolVersion::CURRENT,
+        request_id: 12,
+        response: Response::ProposePresetCatalog(ProposePresetCatalogResponse {
+            proposal_id: 99,
+            expires_in_ms: 15_000,
+        }),
+    };
+    let bytes = fixture("catalog-staged-v11", "response");
+    let length = encode_response(&expected, &mut output).expect("fixture must encode");
+    assert_eq!(&output[..length], bytes);
+    assert_eq!(decode_response(&bytes), Ok(expected));
+
+    assert_event(
+        "live-status-v11",
+        DeviceEvent::LiveStatus(StatusResponse {
+            view_state: ViewState::Running,
+            preset: preset(),
+            remaining_duration_ms: 1_234_000,
+            journal: JournalStatus {
+                epoch: [0x33; 8],
+                oldest_sequence: Some(5),
+                latest_sequence: Some(19),
+                health: JournalHealth::Healthy,
+            },
+            clock_known: true,
+            status_epoch: Some([0x55; 8]),
+            status_revision: Some(41),
+        }),
+    );
+    assert_event(
+        "catalog-result-v11",
+        DeviceEvent::PresetCatalogResult(PresetCatalogResultEvent {
+            proposal_id: 99,
+            result: CatalogResult::Committed,
+            catalog_revision: Some(8),
         }),
     );
 }

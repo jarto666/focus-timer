@@ -1,11 +1,12 @@
 use focus_core::{
-    App, Catalog, CatalogError, DEFAULT_PRESETS, Diagnostic, Effects, FeedbackPattern, InputEvent,
+    App, Catalog, CatalogError, Diagnostic, Effects, FeedbackPattern, InputEvent,
     MAX_SESSION_DURATION_MS, Preset, SETTINGS_SCHEMA_VERSION, SessionOutcome, SessionOutcomeKind,
-    SessionState, SettingsFallback, SettingsLoad, SettingsRecord, ViewState, restore_selection,
+    SessionState, SettingsFallback, SettingsLoad, SettingsRecord, ViewState, default_catalog,
+    default_presets, restore_selection,
 };
 
 fn catalog() -> Catalog {
-    Catalog::new(&DEFAULT_PRESETS, 2).expect("default catalog is valid")
+    default_catalog()
 }
 
 fn boot() -> App {
@@ -35,37 +36,37 @@ fn default_catalog_has_required_presets_in_order() {
 fn catalog_rejects_empty_and_bad_default() {
     assert_eq!(Catalog::new(&[], 0).unwrap_err(), CatalogError::Empty);
     assert_eq!(
-        Catalog::new(&DEFAULT_PRESETS, DEFAULT_PRESETS.len()).unwrap_err(),
+        Catalog::new(default_presets().as_slice(), default_presets().len()).unwrap_err(),
         CatalogError::InvalidDefaultIndex
     );
 }
 
 #[test]
 fn catalog_rejects_invalid_entries() {
-    static BLANK_ID: [Preset; 1] = [Preset::new("  ", "Name", 1)];
-    static BLANK_NAME: [Preset; 1] = [Preset::new("id", "\t", 1)];
-    static ZERO: [Preset; 1] = [Preset::new("id", "Name", 0)];
-    static TOO_LONG: [Preset; 1] = [Preset::new("id", "Name", MAX_SESSION_DURATION_MS + 1)];
-    static DUPLICATE: [Preset; 2] = [Preset::new("id", "One", 1), Preset::new("id", "Two", 2)];
+    let blank_id = [Preset::new("  ", "Name", 1)];
+    let blank_name = [Preset::new("id", "\t", 1)];
+    let zero = [Preset::new("id", "Name", 0)];
+    let too_long = [Preset::new("id", "Name", MAX_SESSION_DURATION_MS + 1)];
+    let duplicate = [Preset::new("id", "One", 1), Preset::new("id", "Two", 2)];
 
     assert_eq!(
-        Catalog::new(&BLANK_ID, 0).unwrap_err(),
+        Catalog::new(&blank_id, 0).unwrap_err(),
         CatalogError::BlankId { index: 0 }
     );
     assert_eq!(
-        Catalog::new(&BLANK_NAME, 0).unwrap_err(),
+        Catalog::new(&blank_name, 0).unwrap_err(),
         CatalogError::BlankName { index: 0 }
     );
     assert_eq!(
-        Catalog::new(&ZERO, 0).unwrap_err(),
+        Catalog::new(&zero, 0).unwrap_err(),
         CatalogError::ZeroDuration { index: 0 }
     );
     assert_eq!(
-        Catalog::new(&TOO_LONG, 0).unwrap_err(),
+        Catalog::new(&too_long, 0).unwrap_err(),
         CatalogError::DurationOutOfRange { index: 0 }
     );
     assert_eq!(
-        Catalog::new(&DUPLICATE, 0).unwrap_err(),
+        Catalog::new(&duplicate, 0).unwrap_err(),
         CatalogError::DuplicateId {
             first: 0,
             duplicate: 1
@@ -153,7 +154,7 @@ fn running_and_paused_cancellation_emit_one_committed_outcome() {
         outcome,
         Some(SessionOutcome {
             kind: SessionOutcomeKind::Cancelled,
-            preset,
+            preset: preset.clone(),
             planned_duration_ms: preset.duration_ms,
             active_duration_ms: 5_000,
         })
@@ -168,7 +169,7 @@ fn running_and_paused_cancellation_emit_one_committed_outcome() {
         outcome,
         Some(SessionOutcome {
             kind: SessionOutcomeKind::Cancelled,
-            preset,
+            preset: preset.clone(),
             planned_duration_ms: preset.duration_ms,
             active_duration_ms: 7_000,
         })
@@ -310,8 +311,8 @@ fn unsupported_events_are_safe_no_ops_in_every_state() {
 
 #[test]
 fn deadline_overflow_leaves_state_unchanged() {
-    static LARGE: [Preset; 1] = [Preset::new("large", "Large", MAX_SESSION_DURATION_MS)];
-    let catalog = Catalog::new(&LARGE, 0).unwrap();
+    let large = [Preset::new("large", "Large", MAX_SESSION_DURATION_MS)];
+    let catalog = Catalog::new(&large, 0).unwrap();
     let (mut app, _) = App::boot(catalog, SettingsLoad::Missing);
     let effects = app.handle(u64::MAX, InputEvent::Press);
 
@@ -342,7 +343,7 @@ fn valid_settings_restore_selected_preset() {
         schema_version: SETTINGS_SCHEMA_VERSION,
         selected_preset_id: "reading",
     };
-    let (index, fallback) = restore_selection(catalog(), SettingsLoad::Record(record));
+    let (index, fallback) = restore_selection(&catalog(), SettingsLoad::Record(record));
 
     assert_eq!(catalog().preset(index).id.as_str(), "reading");
     assert_eq!(fallback, None);
@@ -351,7 +352,7 @@ fn valid_settings_restore_selected_preset() {
 #[test]
 fn missing_settings_use_default_without_error() {
     assert_eq!(
-        restore_selection(catalog(), SettingsLoad::Missing),
+        restore_selection(&catalog(), SettingsLoad::Missing),
         (catalog().default_index(), None)
     );
 }
@@ -368,18 +369,18 @@ fn invalid_settings_use_default_and_report_reason() {
     };
 
     assert_eq!(
-        restore_selection(catalog(), SettingsLoad::Corrupt),
+        restore_selection(&catalog(), SettingsLoad::Corrupt),
         (catalog().default_index(), Some(SettingsFallback::Corrupt))
     );
     assert_eq!(
-        restore_selection(catalog(), SettingsLoad::Record(unsupported)),
+        restore_selection(&catalog(), SettingsLoad::Record(unsupported)),
         (
             catalog().default_index(),
             Some(SettingsFallback::UnsupportedVersion)
         )
     );
     assert_eq!(
-        restore_selection(catalog(), SettingsLoad::Record(removed)),
+        restore_selection(&catalog(), SettingsLoad::Record(removed)),
         (
             catalog().default_index(),
             Some(SettingsFallback::UnknownPreset)

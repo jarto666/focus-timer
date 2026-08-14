@@ -14,6 +14,9 @@ fn session() -> ProtocolSession {
     capabilities.push(Capability::ReadStatus).unwrap();
     capabilities.push(Capability::ReadSessionPages).unwrap();
     capabilities.push(Capability::SetClockAnchor).unwrap();
+    capabilities.push(Capability::LiveStatus).unwrap();
+    capabilities.push(Capability::ReadPresetCatalog).unwrap();
+    capabilities.push(Capability::ProposePresetCatalog).unwrap();
     ProtocolSession::new(HelloResponse {
         device_id: [0x11; 16],
         product_name,
@@ -54,10 +57,37 @@ fn hello_negotiates_minor_and_exposes_bounded_identity() {
         &[
             Capability::ReadStatus,
             Capability::ReadSessionPages,
-            Capability::SetClockAnchor
+            Capability::SetClockAnchor,
+            Capability::LiveStatus,
+            Capability::ReadPresetCatalog,
+            Capability::ProposePresetCatalog,
         ]
     );
     assert!(session.is_ready());
+}
+
+#[test]
+fn protocol_one_zero_negotiates_without_one_one_capabilities() {
+    let mut session = session();
+    let ProtocolAction::Respond(response) = session.handle(&request(
+        8,
+        ProtocolVersion { major: 1, minor: 0 },
+        Request::Hello,
+    )) else {
+        panic!("hello must respond");
+    };
+    assert_eq!(response.version, ProtocolVersion { major: 1, minor: 0 });
+    let Response::Hello(hello) = response.response else {
+        panic!("hello must return identity");
+    };
+    assert_eq!(
+        hello.capabilities.as_slice(),
+        &[
+            Capability::ReadStatus,
+            Capability::ReadSessionPages,
+            Capability::SetClockAnchor,
+        ]
+    );
 }
 
 #[test]

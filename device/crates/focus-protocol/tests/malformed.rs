@@ -46,7 +46,7 @@ fn every_truncated_prefix_and_oversized_input_is_rejected_without_panic() {
     assert_eq!(
         decode_request(HELLO),
         Ok(RequestEnvelope {
-            version: ProtocolVersion::CURRENT,
+            version: ProtocolVersion { major: 1, minor: 0 },
             request_id: 1,
             request: Request::Hello,
         })
@@ -84,7 +84,7 @@ fn unknown_requests_and_incompatible_versions_remain_bounded_handler_inputs() {
     assert_eq!(
         decode_request(&unknown_request),
         Ok(RequestEnvelope {
-            version: ProtocolVersion::CURRENT,
+            version: ProtocolVersion { major: 1, minor: 0 },
             request_id: 1,
             request: Request::Unknown { message_kind: 9 },
         })

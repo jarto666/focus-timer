@@ -1,7 +1,9 @@
 import {
   Capability,
+  CatalogResult,
   JournalHealth,
   MAX_CAPABILITIES,
+  MAX_CUSTOM_PRESETS,
   MAX_FIRMWARE_VERSION_BYTES,
   MAX_LOGICAL_MESSAGE_BYTES,
   MAX_PRESET_ID_BYTES,
@@ -9,14 +11,22 @@ import {
   MAX_PRODUCT_NAME_BYTES,
   MAX_RECORDS_PER_PAGE,
   MAX_SAFE_PROTOCOL_INTEGER,
+  MAX_TOTAL_PRESETS,
   ProtocolErrorCode,
   SessionOutcome,
   ViewState,
   type ClockAnchorResponse,
+  type CatalogEntry,
+  type DeviceEvent,
   type ErrorResponse,
+  type EventEnvelope,
   type HelloResponse,
   type JournalStatus,
   type PresetSnapshot,
+  type PresetCatalogResponse,
+  type PresetCatalogResultEvent,
+  type ProposePresetCatalogRequest,
+  type ProposePresetCatalogResponse,
   type ProtocolVersion,
   type Request,
   type RequestEnvelope,
@@ -28,11 +38,12 @@ import {
 } from './model';
 
 const MAX_MAP_ENTRIES = 16;
-const MAX_ARRAY_ITEMS = 8;
+const MAX_ARRAY_ITEMS = MAX_TOTAL_PRESETS;
 const MAX_TEXT_BYTES = 32;
 const MAX_NESTING_DEPTH = 6;
 const MAX_UINT8 = 0xff;
 const MAX_UINT32 = 0xffff_ffff;
+const BUILT_IN_PRESET_IDS = new Set(['deep-work', 'focus', 'pomodoro', 'reading', 'quick-sprint']);
 
 export type EncodeErrorCode = 'messageTooLarge' | 'invalidValue';
 
@@ -97,6 +108,14 @@ export function encodeResponse(envelope: ResponseEnvelope): Uint8Array {
   return writer.finish();
 }
 
+export function encodeEvent(envelope: EventEnvelope): Uint8Array {
+  validateEventEnvelope(envelope);
+  const writer = new CborWriter();
+  writeEnvelopePrefix(writer, envelope.version, 0, eventMessageKind(envelope.event));
+  writeEventPayload(writer, envelope.event);
+  return writer.finish();
+}
+
 export function decodeRequest(input: Uint8Array): RequestEnvelope {
   const reader = new CborReader(input);
   const length = reader.readMapLength();
@@ -127,7 +146,7 @@ export function decodeRequest(input: Uint8Array): RequestEnvelope {
         if (messageKind === undefined) {
           throw new ProtocolDecodeError('missingField', 3);
         }
-        request = readRequestPayload(reader, messageKind);
+        request = readRequestPayload(reader, messageKind, required(minor, 1));
         break;
       default:
         reader.skipValue(1);
@@ -177,7 +196,7 @@ export function decodeResponse(input: Uint8Array): ResponseEnvelope {
         if (messageKind === undefined) {
           throw new ProtocolDecodeError('missingField', 3);
         }
-        response = readResponsePayload(reader, messageKind);
+        response = readResponsePayload(reader, messageKind, required(minor, 1));
         break;
       default:
         reader.skipValue(1);
@@ -194,6 +213,36 @@ export function decodeResponse(input: Uint8Array): ResponseEnvelope {
     response: required(response, 4),
   };
   decodeValidate(() => validateResponseEnvelope(envelope));
+  return envelope;
+}
+
+export function decodeEvent(input: Uint8Array): EventEnvelope {
+  const reader = new CborReader(input);
+  const length = reader.readMapLength();
+  let previousKey: number | undefined;
+  let major: number | undefined;
+  let minor: number | undefined;
+  let requestId: number | undefined;
+  let messageKind: number | undefined;
+  let event: DeviceEvent | undefined;
+  for (let index = 0; index < length; index += 1) {
+    const key = reader.readMapKey(previousKey);
+    previousKey = key;
+    if (key === 0) major = reader.readUint8(0);
+    else if (key === 1) minor = reader.readUint8(1);
+    else if (key === 2) requestId = reader.readUint32(2);
+    else if (key === 3) messageKind = reader.readUint();
+    else if (key === 4) {
+      event = readEventPayload(reader, required(messageKind, 3), required(minor, 1));
+    } else reader.skipValue(1);
+  }
+  reader.finish();
+  if (required(requestId, 2) !== 0) throw new ProtocolDecodeError('invalidValue', 2);
+  const envelope: EventEnvelope = {
+    version: { major: required(major, 0), minor: required(minor, 1) },
+    event: required(event, 4),
+  };
+  decodeValidate(() => validateEventEnvelope(envelope));
   return envelope;
 }
 
@@ -219,6 +268,7 @@ function writeRequestPayload(writer: CborWriter, request: Request): void {
   switch (request.type) {
     case 'hello':
     case 'getStatus':
+    case 'getPresetCatalog':
     case 'unknown':
       writer.writeMap(0);
       break;
@@ -240,6 +290,9 @@ function writeRequestPayload(writer: CborWriter, request: Request): void {
       writer.writeUint(0);
       writer.writeUint(request.anchor.utcMs);
       break;
+    case 'proposePresetCatalog':
+      writeCatalogProposalRequest(writer, request.proposal);
+      break;
   }
 }
 
@@ -257,10 +310,21 @@ function writeResponsePayload(writer: CborWriter, response: Response): void {
     case 'clockAnchor':
       writeClockAnchor(writer, response.anchor);
       break;
+    case 'presetCatalog':
+      writePresetCatalog(writer, response.catalog);
+      break;
+    case 'proposePresetCatalog':
+      writeCatalogProposalResponse(writer, response.proposal);
+      break;
     case 'error':
       writeError(writer, response.error);
       break;
   }
+}
+
+function writeEventPayload(writer: CborWriter, event: DeviceEvent): void {
+  if (event.type === 'liveStatus') writeStatus(writer, event.status);
+  else writeCatalogResult(writer, event.result);
 }
 
 function writeHello(writer: CborWriter, hello: HelloResponse): void {
@@ -283,7 +347,7 @@ function writeHello(writer: CborWriter, hello: HelloResponse): void {
 }
 
 function writeStatus(writer: CborWriter, status: StatusResponse): void {
-  writer.writeMap(5);
+  writer.writeMap(status.statusEpoch === undefined ? 5 : 7);
   writer.writeUint(0);
   writer.writeUint(status.viewState);
   writer.writeUint(1);
@@ -294,6 +358,72 @@ function writeStatus(writer: CborWriter, status: StatusResponse): void {
   writeJournalStatus(writer, status.journal);
   writer.writeUint(4);
   writer.writeBoolean(status.clockKnown);
+  if (status.statusEpoch !== undefined) {
+    writer.writeUint(5);
+    writer.writeBytes(status.statusEpoch);
+  }
+  if (status.statusRevision !== undefined) {
+    writer.writeUint(6);
+    writer.writeUint(status.statusRevision);
+  }
+}
+
+function writeCatalogEntry(writer: CborWriter, entry: CatalogEntry): void {
+  writer.writeMap(4);
+  writer.writeUint(0);
+  writer.writeText(entry.id);
+  writer.writeUint(1);
+  writer.writeText(entry.name);
+  writer.writeUint(2);
+  writer.writeUint(entry.plannedDurationMs);
+  writer.writeUint(3);
+  writer.writeBoolean(entry.builtIn);
+}
+
+function writePresetCatalog(writer: CborWriter, catalog: PresetCatalogResponse): void {
+  writer.writeMap(2);
+  writer.writeUint(0);
+  writer.writeUint(catalog.revision);
+  writer.writeUint(1);
+  writer.writeArray(catalog.entries.length);
+  for (const entry of catalog.entries) writeCatalogEntry(writer, entry);
+}
+
+function writeCatalogProposalRequest(
+  writer: CborWriter,
+  proposal: ProposePresetCatalogRequest,
+): void {
+  writer.writeMap(3);
+  writer.writeUint(0);
+  writer.writeUint(proposal.expectedRevision);
+  writer.writeUint(1);
+  writer.writeUint(proposal.proposalId);
+  writer.writeUint(2);
+  writer.writeArray(proposal.customEntries.length);
+  for (const preset of proposal.customEntries) writePreset(writer, preset);
+}
+
+function writeCatalogProposalResponse(
+  writer: CborWriter,
+  proposal: ProposePresetCatalogResponse,
+): void {
+  writer.writeMap(2);
+  writer.writeUint(0);
+  writer.writeUint(proposal.proposalId);
+  writer.writeUint(1);
+  writer.writeUint(proposal.expiresInMs);
+}
+
+function writeCatalogResult(writer: CborWriter, result: PresetCatalogResultEvent): void {
+  writer.writeMap(result.catalogRevision === undefined ? 2 : 3);
+  writer.writeUint(0);
+  writer.writeUint(result.proposalId);
+  writer.writeUint(1);
+  writer.writeUint(result.result);
+  if (result.catalogRevision !== undefined) {
+    writer.writeUint(2);
+    writer.writeUint(result.catalogRevision);
+  }
 }
 
 function writePreset(writer: CborWriter, preset: PresetSnapshot): void {
@@ -406,7 +536,11 @@ function writeError(writer: CborWriter, error: ErrorResponse): void {
   }
 }
 
-function readRequestPayload(reader: CborReader, messageKind: number): Request {
+function readRequestPayload(
+  reader: CborReader,
+  messageKind: number,
+  protocolMinor: number,
+): Request {
   switch (messageKind) {
     case 1:
       reader.readEmptyMap();
@@ -458,13 +592,25 @@ function readRequestPayload(reader: CborReader, messageKind: number): Request {
       }
       return { type: 'setClockAnchor', anchor: { utcMs: required(utcMs, 0) } };
     }
+    case 9:
+      if (protocolMinor < 1) break;
+      reader.readEmptyMap();
+      return { type: 'getPresetCatalog' };
+    case 11:
+      if (protocolMinor < 1) break;
+      return { type: 'proposePresetCatalog', proposal: readCatalogProposalRequest(reader) };
     default:
-      reader.skipMap(2);
-      return { type: 'unknown', messageKind };
+      break;
   }
+  reader.skipMap(2);
+  return { type: 'unknown', messageKind };
 }
 
-function readResponsePayload(reader: CborReader, messageKind: number): Response {
+function readResponsePayload(
+  reader: CborReader,
+  messageKind: number,
+  protocolMinor: number,
+): Response {
   switch (messageKind) {
     case 2:
       return { type: 'hello', hello: readHello(reader) };
@@ -474,11 +620,31 @@ function readResponsePayload(reader: CborReader, messageKind: number): Response 
       return { type: 'sessionPage', page: readSessionPage(reader) };
     case 8:
       return { type: 'clockAnchor', anchor: readClockAnchor(reader) };
+    case 10:
+      if (protocolMinor >= 1) return { type: 'presetCatalog', catalog: readPresetCatalog(reader) };
+      break;
+    case 12:
+      if (protocolMinor >= 1)
+        return { type: 'proposePresetCatalog', proposal: readCatalogProposalResponse(reader) };
+      break;
     case 255:
       return { type: 'error', error: readError(reader) };
     default:
-      throw new ProtocolDecodeError('unsupportedMessage', messageKind);
+      break;
   }
+  throw new ProtocolDecodeError('unsupportedMessage', messageKind);
+}
+
+function readEventPayload(
+  reader: CborReader,
+  messageKind: number,
+  protocolMinor: number,
+): DeviceEvent {
+  if (protocolMinor >= 1 && messageKind === 13)
+    return { type: 'liveStatus', status: readStatus(reader) };
+  if (protocolMinor >= 1 && messageKind === 14)
+    return { type: 'presetCatalogResult', result: readCatalogResult(reader) };
+  throw new ProtocolDecodeError('unsupportedMessage', messageKind);
 }
 
 function readHello(reader: CborReader): HelloResponse {
@@ -546,6 +712,8 @@ function readStatus(reader: CborReader): StatusResponse {
   let remainingDurationMs: number | undefined;
   let journal: JournalStatus | undefined;
   let clockKnown: boolean | undefined;
+  let statusEpoch: Uint8Array | undefined;
+  let statusRevision: number | undefined;
   for (let index = 0; index < length; index += 1) {
     const key = reader.readMapKey(previousKey);
     previousKey = key;
@@ -568,6 +736,12 @@ function readStatus(reader: CborReader): StatusResponse {
       case 4:
         clockKnown = reader.readBoolean();
         break;
+      case 5:
+        statusEpoch = reader.readBytesExact(8, 5);
+        break;
+      case 6:
+        statusRevision = reader.readUint();
+        break;
       default:
         reader.skipValue(2);
     }
@@ -578,6 +752,113 @@ function readStatus(reader: CborReader): StatusResponse {
     remainingDurationMs: required(remainingDurationMs, 2),
     journal: required(journal, 3),
     clockKnown: required(clockKnown, 4),
+    ...(statusEpoch === undefined ? {} : { statusEpoch }),
+    ...(statusRevision === undefined ? {} : { statusRevision }),
+  };
+}
+
+function readCatalogEntry(reader: CborReader): CatalogEntry {
+  const length = reader.readMapLength();
+  let previousKey: number | undefined;
+  let id: string | undefined;
+  let name: string | undefined;
+  let plannedDurationMs: number | undefined;
+  let builtIn: boolean | undefined;
+  for (let index = 0; index < length; index += 1) {
+    const key = reader.readMapKey(previousKey);
+    previousKey = key;
+    if (key === 0) id = reader.readText(MAX_PRESET_ID_BYTES, 0);
+    else if (key === 1) name = reader.readText(MAX_PRESET_NAME_BYTES, 1);
+    else if (key === 2) plannedDurationMs = reader.readUint32(2);
+    else if (key === 3) builtIn = reader.readBoolean();
+    else reader.skipValue(3);
+  }
+  return {
+    id: required(id, 0),
+    name: required(name, 1),
+    plannedDurationMs: required(plannedDurationMs, 2),
+    builtIn: required(builtIn, 3),
+  };
+}
+
+function readPresetCatalog(reader: CborReader): PresetCatalogResponse {
+  const length = reader.readMapLength();
+  let previousKey: number | undefined;
+  let revision: number | undefined;
+  let entries: CatalogEntry[] | undefined;
+  for (let index = 0; index < length; index += 1) {
+    const key = reader.readMapKey(previousKey);
+    previousKey = key;
+    if (key === 0) revision = reader.readUint();
+    else if (key === 1) {
+      const count = reader.readArrayLength();
+      entries = [];
+      for (let item = 0; item < count; item += 1) entries.push(readCatalogEntry(reader));
+    } else reader.skipValue(2);
+  }
+  return { revision: required(revision, 0), entries: required(entries, 1) };
+}
+
+function readCatalogProposalRequest(reader: CborReader): ProposePresetCatalogRequest {
+  const length = reader.readMapLength();
+  let previousKey: number | undefined;
+  let expectedRevision: number | undefined;
+  let proposalId: number | undefined;
+  let customEntries: PresetSnapshot[] | undefined;
+  for (let index = 0; index < length; index += 1) {
+    const key = reader.readMapKey(previousKey);
+    previousKey = key;
+    if (key === 0) expectedRevision = reader.readUint();
+    else if (key === 1) proposalId = reader.readUint32(1);
+    else if (key === 2) {
+      const count = reader.readArrayLength();
+      customEntries = [];
+      for (let item = 0; item < count; item += 1) customEntries.push(readPreset(reader));
+    } else reader.skipValue(2);
+  }
+  return {
+    expectedRevision: required(expectedRevision, 0),
+    proposalId: required(proposalId, 1),
+    customEntries: required(customEntries, 2),
+  };
+}
+
+function readCatalogProposalResponse(reader: CborReader): ProposePresetCatalogResponse {
+  const length = reader.readMapLength();
+  let previousKey: number | undefined;
+  let proposalId: number | undefined;
+  let expiresInMs: number | undefined;
+  for (let index = 0; index < length; index += 1) {
+    const key = reader.readMapKey(previousKey);
+    previousKey = key;
+    if (key === 0) proposalId = reader.readUint32(0);
+    else if (key === 1) expiresInMs = reader.readUint32(1);
+    else reader.skipValue(2);
+  }
+  return { proposalId: required(proposalId, 0), expiresInMs: required(expiresInMs, 1) };
+}
+
+function readCatalogResult(reader: CborReader): PresetCatalogResultEvent {
+  const length = reader.readMapLength();
+  let previousKey: number | undefined;
+  let proposalId: number | undefined;
+  let result: CatalogResult | undefined;
+  let catalogRevision: number | undefined;
+  for (let index = 0; index < length; index += 1) {
+    const key = reader.readMapKey(previousKey);
+    previousKey = key;
+    if (key === 0) proposalId = reader.readUint32(0);
+    else if (key === 1) {
+      const raw = reader.readUint();
+      if (!isCatalogResult(raw)) throw new ProtocolDecodeError('invalidValue', 1);
+      result = raw;
+    } else if (key === 2) catalogRevision = reader.readUint();
+    else reader.skipValue(2);
+  }
+  return {
+    proposalId: required(proposalId, 0),
+    result: required(result, 1),
+    ...(catalogRevision === undefined ? {} : { catalogRevision }),
   };
 }
 
@@ -757,6 +1038,7 @@ function validateRequestEnvelope(envelope: RequestEnvelope): void {
   switch (envelope.request.type) {
     case 'hello':
     case 'getStatus':
+    case 'getPresetCatalog':
       break;
     case 'unknown':
       validateSafeUint(envelope.request.messageKind, 'messageKind');
@@ -773,6 +1055,9 @@ function validateRequestEnvelope(envelope: RequestEnvelope): void {
     }
     case 'setClockAnchor':
       validateSafeUint(envelope.request.anchor.utcMs, 'utcMs');
+      break;
+    case 'proposePresetCatalog':
+      validateCatalogProposal(envelope.request.proposal);
       break;
   }
 }
@@ -797,10 +1082,27 @@ function validateResponseEnvelope(envelope: ResponseEnvelope): void {
         'deviceMonotonicMsAtReceipt',
       );
       break;
+    case 'presetCatalog':
+      validateCatalog(envelope.response.catalog);
+      break;
+    case 'proposePresetCatalog':
+      validateNonzeroUint32(envelope.response.proposal.proposalId, 'proposalId');
+      validateUint(envelope.response.proposal.expiresInMs, MAX_UINT32, 'expiresInMs');
+      if (envelope.response.proposal.expiresInMs === 0) invalid('expiresInMs');
+      break;
     case 'error':
       validateError(envelope.response.error);
       break;
   }
+}
+
+function validateEventEnvelope(envelope: EventEnvelope): void {
+  validateVersion(envelope.version);
+  if (envelope.version.minor < 1) invalid('protocolMinor');
+  if (envelope.event.type === 'liveStatus') {
+    validateStatus(envelope.event.status);
+    if (envelope.event.status.statusEpoch === undefined) invalid('statusEpoch');
+  } else validateCatalogResult(envelope.event.result);
 }
 
 function validateVersion(version: ProtocolVersion): void {
@@ -835,6 +1137,79 @@ function validateStatus(status: StatusResponse): void {
   validateBytes(status.journal.epoch, 8, 'journalEpoch');
   if (!isJournalHealth(status.journal.health)) invalid('journalHealth');
   validateBounds(status.journal.oldestSequence, status.journal.latestSequence);
+  if ((status.statusEpoch === undefined) !== (status.statusRevision === undefined)) {
+    invalid('statusEpoch');
+  }
+  if (status.statusEpoch !== undefined) validateBytes(status.statusEpoch, 8, 'statusEpoch');
+  if (status.statusRevision !== undefined) {
+    validateSafeUint(status.statusRevision, 'statusRevision');
+    if (status.statusRevision === 0) invalid('statusRevision');
+  }
+}
+
+function validateCatalog(catalog: PresetCatalogResponse): void {
+  validateSafeUint(catalog.revision, 'catalogRevision');
+  if (catalog.entries.length < 5 || catalog.entries.length > MAX_TOTAL_PRESETS) {
+    invalid('catalogEntries');
+  }
+  let customSeen = false;
+  let builtInCount = 0;
+  const ids = new Set<string>();
+  for (const entry of catalog.entries) {
+    validatePreset(entry);
+    if (ids.has(entry.id)) invalid('presetId');
+    ids.add(entry.id);
+    if (entry.builtIn) {
+      if (customSeen) invalid('builtIn');
+      builtInCount += 1;
+    } else {
+      customSeen = true;
+      validateCustomPreset(entry);
+    }
+  }
+  if (builtInCount !== 5 || catalog.entries.length - builtInCount > MAX_CUSTOM_PRESETS) {
+    invalid('builtIn');
+  }
+}
+
+function validateCatalogProposal(proposal: ProposePresetCatalogRequest): void {
+  validateSafeUint(proposal.expectedRevision, 'expectedRevision');
+  validateNonzeroUint32(proposal.proposalId, 'proposalId');
+  if (proposal.customEntries.length > MAX_CUSTOM_PRESETS) invalid('customEntries');
+  const ids = new Set<string>();
+  for (const preset of proposal.customEntries) {
+    validateCustomPreset(preset);
+    if (BUILT_IN_PRESET_IDS.has(preset.id)) invalid('presetId');
+    if (ids.has(preset.id)) invalid('presetId');
+    ids.add(preset.id);
+  }
+}
+
+function validateCustomPreset(preset: PresetSnapshot): void {
+  validatePreset(preset);
+  if (
+    preset.plannedDurationMs < 60_000 ||
+    preset.plannedDurationMs > 43_200_000 ||
+    preset.plannedDurationMs % 60_000 !== 0
+  ) {
+    invalid('plannedDurationMs');
+  }
+}
+
+function validateCatalogResult(result: PresetCatalogResultEvent): void {
+  validateNonzeroUint32(result.proposalId, 'proposalId');
+  if (!isCatalogResult(result.result)) invalid('result');
+  if (result.result === CatalogResult.Committed) {
+    if (result.catalogRevision === undefined || result.catalogRevision === 0) {
+      invalid('catalogRevision');
+    }
+    validateSafeUint(result.catalogRevision, 'catalogRevision');
+  } else if (result.catalogRevision !== undefined) invalid('catalogRevision');
+}
+
+function validateNonzeroUint32(value: number, field: string): void {
+  validateUint(value, MAX_UINT32, field);
+  if (value === 0) invalid(field);
 }
 
 function validatePreset(preset: PresetSnapshot): void {
@@ -961,6 +1336,10 @@ function requestMessageKind(request: Request): number {
       return 5;
     case 'setClockAnchor':
       return 7;
+    case 'getPresetCatalog':
+      return 9;
+    case 'proposePresetCatalog':
+      return 11;
     case 'unknown':
       return request.messageKind;
   }
@@ -976,16 +1355,27 @@ function responseMessageKind(response: Response): number {
       return 6;
     case 'clockAnchor':
       return 8;
+    case 'presetCatalog':
+      return 10;
+    case 'proposePresetCatalog':
+      return 12;
     case 'error':
       return 255;
   }
+}
+
+function eventMessageKind(event: DeviceEvent): number {
+  return event.type === 'liveStatus' ? 13 : 14;
 }
 
 function isCapability(value: number): value is Capability {
   return (
     value === Capability.ReadStatus ||
     value === Capability.ReadSessionPages ||
-    value === Capability.SetClockAnchor
+    value === Capability.SetClockAnchor ||
+    value === Capability.LiveStatus ||
+    value === Capability.ReadPresetCatalog ||
+    value === Capability.ProposePresetCatalog
   );
 }
 
@@ -1006,7 +1396,15 @@ function isSessionOutcome(value: number): value is SessionOutcome {
 function isProtocolErrorCode(value: number): value is ProtocolErrorCode {
   return (
     value >= ProtocolErrorCode.MalformedEnvelope &&
-    value <= ProtocolErrorCode.InternalError &&
+    value <= ProtocolErrorCode.CatalogConflict &&
+    Number.isInteger(value)
+  );
+}
+
+function isCatalogResult(value: number): value is CatalogResult {
+  return (
+    value >= CatalogResult.Committed &&
+    value <= CatalogResult.StorageFailed &&
     Number.isInteger(value)
   );
 }

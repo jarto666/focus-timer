@@ -26,6 +26,7 @@ export class ForegroundSyncError extends Error {
 }
 
 export type ForegroundSyncResult = Readonly<{
+  client: DeviceClient;
   deviceId: string;
   device: KnownDeviceRecord;
   status: Awaited<ReturnType<DeviceClient['getStatus']>>;
@@ -82,6 +83,7 @@ export async function synchronizeForeground(
   if (status.journal.health === JournalHealth.Unavailable) {
     return {
       deviceId,
+      client,
       device,
       status,
       pagesCommitted: 0,
@@ -100,6 +102,7 @@ export async function synchronizeForeground(
   ) {
     return {
       deviceId,
+      client,
       device,
       status,
       pagesCommitted: 0,
@@ -140,6 +143,7 @@ export async function synchronizeForeground(
     if (page.continuationAfterSequence === undefined) {
       return {
         deviceId,
+        client,
         device,
         status,
         pagesCommitted,

@@ -19,25 +19,25 @@ use esp_idf_svc::hal::{
     units::KiloHertz,
 };
 use esp_idf_svc::nvs::EspDefaultNvsPartition;
-#[cfg(not(any(
-    feature = "acceptance-diagnostic",
-    feature = "radio-failure-diagnostic"
-)))]
-use focus_core::DEFAULT_PRESETS;
-use focus_core::{App, Catalog, Effects, InputEvent, Preset, SettingsLoad};
+use focus_core::{
+    App, Catalog, CatalogConfirmationAction, CatalogStageError, CatalogUpdateCoordinator, Effects,
+    InputEvent, Preset, SettingsLoad, ViewState, default_presets,
+};
 use focus_firmware::{
     buzzer::BuzzerCadence,
     input::EncoderInput,
     journal_adapter::{FlushOutcome as JournalFlushOutcome, OutcomeJournalQueue},
-    presentation::{OLED_LAYOUT, OledView, oled_view},
-    protocol_projection::{session_page_response, status_response},
+    presentation::{OLED_LAYOUT, OledView, catalog_confirmation_view, oled_view},
+    preset_storage::{commit_catalog, load_catalog},
+    protocol_projection::{session_page_response, status_response_with_order},
     protocol_session::{ProtocolAction, ProtocolSession},
     settings::{FlushOutcome, QueueOutcome, SelectionPersistence, StoredSettings, load_settings},
 };
 use focus_protocol::{
-    Capability, ClockAnchorResponse, ErrorCode, ErrorResponse, HelloResponse,
-    MAX_LOGICAL_MESSAGE_BYTES, ProtocolVersion, Response, ResponseEnvelope, decode_request,
-    encode_response,
+    Capability, CatalogEntry, CatalogResult, ClockAnchorResponse, DeviceEvent, ErrorCode,
+    ErrorResponse, EventEnvelope, HelloResponse, MAX_LOGICAL_MESSAGE_BYTES, PresetCatalogResponse,
+    PresetCatalogResultEvent, PresetSnapshot, ProposePresetCatalogResponse, ProtocolVersion,
+    Response, ResponseEnvelope, decode_request, encode_event, encode_response,
 };
 use focus_sync::{
     JOURNAL_CAPACITY, JournalStatus, PersistentJournal, VolatileClock, project_status,
@@ -52,6 +52,7 @@ use crate::{
     ble_radio::{BleRadio, NotificationProgress},
     clock::MonotonicClock,
     nvs_journal::{EspEntropy, NvsJournalStore},
+    nvs_presets::NvsPresetCatalogStore,
     nvs_settings::NvsSettingsStore,
 };
 
@@ -147,28 +148,39 @@ fn initialize_session_journal(
     }
 }
 
-#[cfg(not(any(
-    feature = "acceptance-diagnostic",
-    feature = "radio-failure-diagnostic"
-)))]
-const RUNTIME_PRESETS: [Preset; 5] = DEFAULT_PRESETS;
-
 /// Short copies of the production presets for an on-device lifecycle check.
 ///
 /// IDs, names, ordering, input handling, rendering, and feedback remain the
 /// same as production. Only durations are shortened so completion can be
 /// observed without waiting fifteen minutes.
-#[cfg(any(
-    feature = "acceptance-diagnostic",
-    feature = "radio-failure-diagnostic"
-))]
-const RUNTIME_PRESETS: [Preset; 5] = [
-    Preset::new("deep-work", "Deep Work", 8_000),
-    Preset::new("focus", "Focus", 8_000),
-    Preset::new("pomodoro", "Pomodoro", 8_000),
-    Preset::new("reading", "Reading", 8_000),
-    Preset::new("quick-sprint", "Quick Sprint", 8_000),
-];
+fn runtime_built_ins() -> heapless::Vec<Preset, 13> {
+    #[cfg(not(any(
+        feature = "acceptance-diagnostic",
+        feature = "radio-failure-diagnostic"
+    )))]
+    {
+        return default_presets();
+    }
+    #[cfg(any(
+        feature = "acceptance-diagnostic",
+        feature = "radio-failure-diagnostic"
+    ))]
+    {
+        let mut presets = heapless::Vec::new();
+        for (id, name) in [
+            ("deep-work", "Deep Work"),
+            ("focus", "Focus"),
+            ("pomodoro", "Pomodoro"),
+            ("reading", "Reading"),
+            ("quick-sprint", "Quick Sprint"),
+        ] {
+            presets
+                .push(Preset::built_in(id, name, 8_000))
+                .expect("five diagnostics presets fit");
+        }
+        presets
+    }
+}
 
 /// Owns application state and serializes semantic encoder and clock events.
 // Hardware acquisition, optional adapter setup, and the one authoritative
@@ -260,7 +272,6 @@ pub fn run() -> ! {
         }
     };
 
-    let catalog = Catalog::new(&RUNTIME_PRESETS, 2).expect("firmware catalog must be valid");
     log::info!("runtime stage: opening persistent stores");
     let nvs_partition = match EspDefaultNvsPartition::take() {
         Ok(partition) => Some(partition),
@@ -283,6 +294,50 @@ pub fn run() -> ! {
         },
         None => None,
     };
+    let mut preset_store = match nvs_partition.as_ref() {
+        Some(partition) => match NvsPresetCatalogStore::open(partition.clone()) {
+            Ok(store) => Some(store),
+            Err(error) => {
+                log::error!(
+                    "preset catalog NVS unavailable: {error:?}; continuing with built-ins only"
+                );
+                None
+            }
+        },
+        None => None,
+    };
+    let loaded_catalog = preset_store
+        .as_mut()
+        .and_then(|store| match load_catalog(store) {
+            Ok(catalog) => {
+                if catalog.degraded {
+                    log::warn!(
+                        "preset catalog recovered in degraded mode at revision={}",
+                        catalog.revision
+                    );
+                }
+                Some(catalog)
+            }
+            Err(error) => {
+                log::error!(
+                    "preset catalog read failed: {error:?}; continuing with built-ins only"
+                );
+                None
+            }
+        });
+    let mut runtime_presets = runtime_built_ins();
+    if let Some(stored) = loaded_catalog.as_ref() {
+        for preset in &stored.custom_entries {
+            runtime_presets
+                .push(preset.clone())
+                .expect("persisted catalog validation enforces total capacity");
+        }
+    }
+    let catalog = Catalog::combined(runtime_presets.as_slice())
+        .expect("firmware and recovered catalog must be valid");
+    let mut catalog_revision = loaded_catalog
+        .as_ref()
+        .map_or(0, |catalog| catalog.revision);
     let mut entropy = EspEntropy;
     let mut session_journal = match nvs_partition.as_ref() {
         Some(partition) => match NvsJournalStore::open(partition.clone()) {
@@ -329,6 +384,19 @@ pub fn run() -> ! {
     let (mut app, boot_effects) = App::boot(catalog, boot_settings);
     let clock = MonotonicClock::new();
     let mut wall_clock = VolatileClock::new();
+    let mut status_epoch = [0_u8; 8];
+    if let Err(error) = getrandom::fill(&mut status_epoch) {
+        log::warn!("status epoch entropy failed: {error:?}; deriving it from device identity");
+        if let Some(journal) = session_journal.as_ref() {
+            status_epoch.copy_from_slice(&journal.journal().device_id()[..8]);
+        } else {
+            status_epoch = clock.now_ms().to_be_bytes();
+        }
+    }
+    let mut status_revision = 1_u64;
+    let mut live_status_pending = true;
+    let mut pending_catalog_result: Option<PresetCatalogResultEvent> = None;
+    let mut catalog_updates = CatalogUpdateCoordinator::new();
     let mut protocol_session = session_journal
         .as_ref()
         .map(|journal| ProtocolSession::new(protocol_hello(journal.journal().device_id())));
@@ -363,6 +431,7 @@ pub fn run() -> ! {
         .map_or(0, |radio| radio.connection_snapshot().generation);
     let mut outcome_queue = OutcomeJournalQueue::new();
     let mut next_time_advance_ms = 0;
+    let mut next_live_status_ms = 0;
     let mut next_render_attempt_ms = 0;
     let mut render_pending = boot_effects.render;
     let mut rendered_second = None;
@@ -392,20 +461,49 @@ pub fn run() -> ! {
         let now_ms = clock.now_ms();
         let events = input.sample(now_ms, s2.is_high(), s1.is_high(), key.is_low());
         if let Some(event) = events.rotation {
-            process_event(
-                &mut app,
-                now_ms,
-                event,
-                &mut render_pending,
-                &mut buzzer_cadence,
-                &mut buzzer_output,
-                &mut selection_persistence,
-                &mut outcome_queue,
-                wall_clock,
-            );
+            if catalog_updates.pending_proposal_id().is_none()
+                && process_event(
+                    &mut app,
+                    now_ms,
+                    event,
+                    &mut render_pending,
+                    &mut buzzer_cadence,
+                    &mut buzzer_output,
+                    &mut selection_persistence,
+                    &mut outcome_queue,
+                    wall_clock,
+                )
+            {
+                mark_live_status(&mut status_revision, &mut live_status_pending);
+            }
         }
         if let Some(event) = events.button {
-            process_event(
+            if catalog_updates.pending_proposal_id().is_some() {
+                let action = catalog_updates.handle_input(now_ms, event);
+                let resolution = resolve_catalog_action(
+                    action,
+                    &mut app,
+                    preset_store.as_mut(),
+                    &mut catalog_revision,
+                );
+                if let Some(effects) = resolution.effects {
+                    observe_effects(
+                        effects,
+                        &mut render_pending,
+                        now_ms,
+                        &mut buzzer_cadence,
+                        &mut buzzer_output,
+                        &mut selection_persistence,
+                    );
+                }
+                if let Some(result) = resolution.result {
+                    pending_catalog_result = Some(result);
+                    render_pending = true;
+                }
+                if resolution.catalog_changed {
+                    mark_live_status(&mut status_revision, &mut live_status_pending);
+                }
+            } else if process_event(
                 &mut app,
                 now_ms,
                 event,
@@ -415,11 +513,13 @@ pub fn run() -> ! {
                 &mut selection_persistence,
                 &mut outcome_queue,
                 wall_clock,
-            );
+            ) {
+                mark_live_status(&mut status_revision, &mut live_status_pending);
+            }
         }
 
         if now_ms >= next_time_advance_ms {
-            process_event(
+            if process_event(
                 &mut app,
                 now_ms,
                 InputEvent::TimeAdvanced,
@@ -429,8 +529,28 @@ pub fn run() -> ! {
                 &mut selection_persistence,
                 &mut outcome_queue,
                 wall_clock,
-            );
+            ) {
+                mark_live_status(&mut status_revision, &mut live_status_pending);
+            }
             next_time_advance_ms = now_ms.saturating_add(TIME_ADVANCE_INTERVAL_MS);
+        }
+
+        if let Some(action) = catalog_updates.expire(now_ms) {
+            let resolution = resolve_catalog_action(
+                action,
+                &mut app,
+                preset_store.as_mut(),
+                &mut catalog_revision,
+            );
+            pending_catalog_result = resolution.result;
+            render_pending = true;
+        }
+
+        if app.snapshot(now_ms).state == ViewState::Running && now_ms >= next_live_status_ms {
+            mark_live_status(&mut status_revision, &mut live_status_pending);
+            next_live_status_ms = now_ms.saturating_add(1_000);
+        } else if app.snapshot(now_ms).state != ViewState::Running {
+            next_live_status_ms = now_ms.saturating_add(1_000);
         }
 
         if let Some(on) = buzzer_cadence.update(now_ms) {
@@ -470,10 +590,23 @@ pub fn run() -> ! {
             if connection.generation != observed_ble_generation {
                 observed_ble_generation = connection.generation;
                 session.reset();
+                if !connection.connected {
+                    let resolution = resolve_catalog_action(
+                        catalog_updates.cancel(),
+                        &mut app,
+                        preset_store.as_mut(),
+                        &mut catalog_revision,
+                    );
+                    if resolution.result.is_some() {
+                        pending_catalog_result = resolution.result;
+                        render_pending = true;
+                    }
+                }
                 log::info!(
-                    "BLE protocol session reset for connection generation={observed_ble_generation} connected={} subscribed={} mtu={}",
+                    "BLE protocol session reset for connection generation={observed_ble_generation} connected={} subscribed={} event_subscribed={} mtu={}",
                     connection.connected,
                     connection.subscribed,
+                    connection.event_subscribed,
                     connection.mtu
                 );
                 log_resource_snapshot(if connection.connected {
@@ -492,14 +625,46 @@ pub fn run() -> ! {
                         session,
                         radio,
                         &app,
+                        &mut catalog_updates,
+                        catalog_revision,
+                        &mut pending_catalog_result,
                         session_journal.as_deref(),
                         &mut wall_clock,
+                        status_epoch,
+                        status_revision,
                     );
+                    if catalog_updates.pending_proposal_id().is_some() {
+                        render_pending = true;
+                    }
                 } else {
                     log::warn!(
                         "discarded stale BLE request from generation={} current={observed_ble_generation}",
                         message.connection_generation
                     );
+                }
+            }
+
+            let live_events_negotiated = session
+                .negotiated_version()
+                .is_some_and(|version| version.minor >= 1);
+            if connection.event_subscribed && live_events_negotiated && !radio.event_outbound_busy()
+            {
+                if let Some(result) = pending_catalog_result {
+                    if queue_device_event(radio, DeviceEvent::PresetCatalogResult(result)) {
+                        pending_catalog_result = None;
+                    }
+                } else if live_status_pending {
+                    if let Some(status) = ordered_status(
+                        &app,
+                        now_ms,
+                        session_journal.as_deref(),
+                        wall_clock,
+                        status_epoch,
+                        status_revision,
+                    ) && queue_device_event(radio, DeviceEvent::LiveStatus(status))
+                    {
+                        live_status_pending = false;
+                    }
                 }
             }
 
@@ -538,6 +703,21 @@ pub fn run() -> ! {
                         );
                     }
                 }
+                match radio.poll_event_notification() {
+                    Ok(NotificationProgress::Idle | NotificationProgress::Sent) => {}
+                    Ok(NotificationProgress::Complete) => {
+                        log::debug!("BLE logical event notification transfer complete");
+                    }
+                    Ok(NotificationProgress::DroppedConnection) => {
+                        log::warn!("BLE event dropped after connection lifecycle changed");
+                    }
+                    Err(error) => {
+                        log::warn!(
+                            "BLE event notification failed; latest state remains recoverable by GetStatus: {error:?}"
+                        );
+                        live_status_pending = true;
+                    }
+                }
             }
         }
 
@@ -548,7 +728,9 @@ pub fn run() -> ! {
         }
 
         if render_pending && now_ms >= next_render_attempt_ms {
-            let view = oled_view(snapshot);
+            let view = catalog_updates
+                .pending_entry_count()
+                .map_or_else(|| oled_view(snapshot), catalog_confirmation_view);
             if let Some(display) = display.as_mut() {
                 display.clear_buffer();
                 draw_view(display, &view).expect("drawing into the OLED buffer must succeed");
@@ -590,7 +772,16 @@ fn protocol_hello(device_id: [u8; 16]) -> HelloResponse {
         .expect("three capabilities fit the protocol registry");
     capabilities
         .push(Capability::SetClockAnchor)
-        .expect("three capabilities fit the protocol registry");
+        .expect("capabilities fit the protocol registry");
+    capabilities
+        .push(Capability::LiveStatus)
+        .expect("capabilities fit the protocol registry");
+    capabilities
+        .push(Capability::ReadPresetCatalog)
+        .expect("capabilities fit the protocol registry");
+    capabilities
+        .push(Capability::ProposePresetCatalog)
+        .expect("capabilities fit the protocol registry");
     HelloResponse {
         device_id,
         product_name: "FocusTimer"
@@ -614,8 +805,13 @@ fn process_protocol_message(
     session: &mut ProtocolSession,
     radio: &mut BleRadio,
     app: &App,
+    catalog_updates: &mut CatalogUpdateCoordinator,
+    catalog_revision: u64,
+    pending_catalog_result: &mut Option<PresetCatalogResultEvent>,
     journal: Option<&PersistentJournal<NvsJournalStore, JOURNAL_CAPACITY>>,
     wall_clock: &mut VolatileClock,
+    status_epoch: [u8; 8],
+    status_revision: u64,
 ) {
     let request = match decode_request(bytes) {
         Ok(request) => request,
@@ -658,7 +854,7 @@ fn process_protocol_message(
                     },
                     *wall_clock,
                 );
-                match status_response(status) {
+                match status_response_with_order(&status, Some((status_epoch, status_revision))) {
                     Ok(status) => ResponseEnvelope {
                         version,
                         request_id,
@@ -742,6 +938,76 @@ fn process_protocol_message(
                 )
             }
         },
+        ProtocolAction::ReadPresetCatalog {
+            request_id,
+            version,
+        } => match protocol_catalog(app.catalog(), catalog_revision) {
+            Ok(catalog) => ResponseEnvelope {
+                version,
+                request_id,
+                response: Response::PresetCatalog(catalog),
+            },
+            Err(()) => protocol_error(request_id, version, ErrorCode::InternalError, Some(9), None),
+        },
+        ProtocolAction::ProposePresetCatalog {
+            request_id,
+            version,
+            proposal,
+        } => match proposed_catalog(&proposal.custom_entries) {
+            Ok(catalog) => match catalog_updates.stage(
+                now_ms,
+                app.is_idle(),
+                catalog_revision,
+                proposal.expected_revision,
+                proposal.proposal_id,
+                catalog,
+            ) {
+                Ok(staged) => {
+                    if let Some(replaced) = staged.replaced_proposal_id {
+                        *pending_catalog_result = Some(PresetCatalogResultEvent {
+                            proposal_id: replaced,
+                            result: CatalogResult::Cancelled,
+                            catalog_revision: None,
+                        });
+                    }
+                    ResponseEnvelope {
+                        version,
+                        request_id,
+                        response: Response::ProposePresetCatalog(ProposePresetCatalogResponse {
+                            proposal_id: staged.proposal_id,
+                            expires_in_ms: u32::try_from(
+                                staged.expires_at_ms.saturating_sub(now_ms),
+                            )
+                            .unwrap_or(u32::MAX),
+                        }),
+                    }
+                }
+                Err(CatalogStageError::Busy) => {
+                    protocol_error(request_id, version, ErrorCode::Busy, Some(11), None)
+                }
+                Err(CatalogStageError::Conflict { .. }) => protocol_error(
+                    request_id,
+                    version,
+                    ErrorCode::CatalogConflict,
+                    Some(11),
+                    Some(0),
+                ),
+                Err(CatalogStageError::DeadlineOverflow) => protocol_error(
+                    request_id,
+                    version,
+                    ErrorCode::InternalError,
+                    Some(11),
+                    None,
+                ),
+            },
+            Err(()) => protocol_error(
+                request_id,
+                version,
+                ErrorCode::InvalidField,
+                Some(11),
+                Some(2),
+            ),
+        },
     };
 
     let mut encoded = [0; MAX_LOGICAL_MESSAGE_BYTES];
@@ -758,6 +1024,8 @@ fn process_protocol_message(
         Response::Status(_) => 4,
         Response::SessionPage(_) => 6,
         Response::ClockAnchor(_) => 8,
+        Response::PresetCatalog(_) => 10,
+        Response::ProposePresetCatalog(_) => 12,
         Response::Error(_) => 255,
     };
     log::info!(
@@ -792,6 +1060,165 @@ fn log_resource_snapshot(phase: &str) {
 #[cfg(not(feature = "acceptance-diagnostic"))]
 fn log_resource_snapshot(_phase: &str) {}
 
+fn mark_live_status(revision: &mut u64, pending: &mut bool) {
+    *revision = revision.saturating_add(1);
+    *pending = true;
+}
+
+fn ordered_status(
+    app: &App,
+    now_ms: u64,
+    journal: Option<&PersistentJournal<NvsJournalStore, JOURNAL_CAPACITY>>,
+    wall_clock: VolatileClock,
+    status_epoch: [u8; 8],
+    status_revision: u64,
+) -> Option<focus_protocol::StatusResponse> {
+    let journal = journal?;
+    let model = journal.journal();
+    let (oldest_sequence, latest_sequence) = model.bounds();
+    let status = project_status(
+        app,
+        now_ms,
+        JournalStatus {
+            epoch: model.epoch(),
+            oldest_sequence,
+            latest_sequence,
+            health: model.health(),
+        },
+        wall_clock,
+    );
+    status_response_with_order(&status, Some((status_epoch, status_revision))).ok()
+}
+
+fn queue_device_event(radio: &mut BleRadio, event: DeviceEvent) -> bool {
+    let envelope = EventEnvelope {
+        version: ProtocolVersion::CURRENT,
+        event,
+    };
+    let mut encoded = [0; MAX_LOGICAL_MESSAGE_BYTES];
+    let Ok(length) = encode_event(&envelope, &mut encoded) else {
+        log::error!("BLE device event encoding failed");
+        return false;
+    };
+    match radio.queue_latest_event(&encoded[..length]) {
+        Ok(()) => true,
+        Err(
+            crate::ble_radio::QueueError::Disconnected
+            | crate::ble_radio::QueueError::NotSubscribed,
+        ) => false,
+        Err(error) => {
+            log::warn!("BLE device event could not enter latest-value outbox: {error:?}");
+            false
+        }
+    }
+}
+
+fn protocol_catalog(catalog: &Catalog, revision: u64) -> Result<PresetCatalogResponse, ()> {
+    let mut entries = heapless::Vec::new();
+    for preset in catalog.presets() {
+        entries
+            .push(CatalogEntry {
+                preset: PresetSnapshot {
+                    id: preset.id.as_str().try_into().map_err(|()| ())?,
+                    name: preset.name.as_str().try_into().map_err(|()| ())?,
+                    planned_duration_ms: u32::try_from(preset.duration_ms).map_err(|_| ())?,
+                },
+                built_in: preset.built_in,
+            })
+            .map_err(|_| ())?;
+    }
+    Ok(PresetCatalogResponse { revision, entries })
+}
+
+fn proposed_catalog(custom_entries: &heapless::Vec<PresetSnapshot, 8>) -> Result<Catalog, ()> {
+    let mut presets = runtime_built_ins();
+    for entry in custom_entries {
+        presets
+            .push(
+                Preset::custom(
+                    entry.id.as_str(),
+                    entry.name.as_str(),
+                    u64::from(entry.planned_duration_ms),
+                )
+                .map_err(|_| ())?,
+            )
+            .map_err(|_| ())?;
+    }
+    Catalog::combined(presets.as_slice()).map_err(|_| ())
+}
+
+struct CatalogResolution {
+    result: Option<PresetCatalogResultEvent>,
+    effects: Option<Effects>,
+    catalog_changed: bool,
+}
+
+fn resolve_catalog_action(
+    action: CatalogConfirmationAction,
+    app: &mut App,
+    store: Option<&mut NvsPresetCatalogStore>,
+    catalog_revision: &mut u64,
+) -> CatalogResolution {
+    let result_only = |proposal_id, result| CatalogResolution {
+        result: Some(PresetCatalogResultEvent {
+            proposal_id,
+            result,
+            catalog_revision: None,
+        }),
+        effects: None,
+        catalog_changed: false,
+    };
+    match action {
+        CatalogConfirmationAction::None => CatalogResolution {
+            result: None,
+            effects: None,
+            catalog_changed: false,
+        },
+        CatalogConfirmationAction::Rejected { proposal_id } => {
+            result_only(proposal_id, CatalogResult::Rejected)
+        }
+        CatalogConfirmationAction::Expired { proposal_id } => {
+            result_only(proposal_id, CatalogResult::Expired)
+        }
+        CatalogConfirmationAction::Cancelled { proposal_id } => {
+            result_only(proposal_id, CatalogResult::Cancelled)
+        }
+        CatalogConfirmationAction::Commit(commit) => {
+            let Some(store) = store else {
+                return result_only(commit.proposal_id, CatalogResult::StorageFailed);
+            };
+            if commit.expected_revision != *catalog_revision {
+                return result_only(commit.proposal_id, CatalogResult::Cancelled);
+            }
+            let custom = &commit.catalog.presets()[5..];
+            match commit_catalog(store, *catalog_revision, custom) {
+                Ok(stored) => match app.replace_catalog(commit.catalog) {
+                    Ok(effects) => {
+                        *catalog_revision = stored.revision;
+                        CatalogResolution {
+                            result: Some(PresetCatalogResultEvent {
+                                proposal_id: commit.proposal_id,
+                                result: CatalogResult::Committed,
+                                catalog_revision: Some(stored.revision),
+                            }),
+                            effects: Some(effects),
+                            catalog_changed: true,
+                        }
+                    }
+                    Err(error) => {
+                        log::error!("durable catalog could not enter Idle app: {error:?}");
+                        result_only(commit.proposal_id, CatalogResult::StorageFailed)
+                    }
+                },
+                Err(error) => {
+                    log::error!("preset catalog durable commit failed: {error:?}");
+                    result_only(commit.proposal_id, CatalogResult::StorageFailed)
+                }
+            }
+        }
+    }
+}
+
 fn protocol_error(
     request_id: u32,
     version: ProtocolVersion,
@@ -824,11 +1251,12 @@ fn process_event(
     selection_persistence: &mut SelectionPersistence,
     outcome_queue: &mut OutcomeJournalQueue,
     wall_clock: VolatileClock,
-) {
-    let before = app.snapshot(now_ms).state;
+) -> bool {
+    let before_snapshot = app.snapshot(now_ms);
+    let before = before_snapshot.state;
     let effects = app.handle(now_ms, event);
     let after = app.snapshot(now_ms).state;
-    match outcome_queue.observe(before, after, now_ms, effects.outcome, wall_clock) {
+    match outcome_queue.observe(before, after, now_ms, effects.outcome.clone(), wall_clock) {
         Ok(focus_firmware::journal_adapter::ObserveOutcome::NoRecord) => {}
         Ok(focus_firmware::journal_adapter::ObserveOutcome::Queued) => {
             log::info!("committed session outcome queued for journal append");
@@ -850,6 +1278,8 @@ fn process_event(
         buzzer_output,
         selection_persistence,
     );
+    before_snapshot.state != app.snapshot(now_ms).state
+        || before_snapshot.preset.id != app.snapshot(now_ms).preset.id
 }
 
 fn observe_effects(
@@ -867,7 +1297,7 @@ fn observe_effects(
         log::info!("buzzer feedback started: {feedback:?}");
     }
     if let Some(preset) = effects.persist_selection {
-        match selection_persistence.selection_changed(now_ms, preset) {
+        match selection_persistence.selection_changed(now_ms, preset.clone()) {
             Ok(QueueOutcome::Scheduled) => {
                 log::info!(
                     "selection save scheduled after quiet time: {}",
@@ -925,7 +1355,7 @@ where
     )
     .draw(target)?;
     Text::with_baseline(
-        view.preset_name,
+        view.preset_name.as_str(),
         Point::new(0, i32::from(OLED_LAYOUT.preset_y)),
         small,
         Baseline::Top,

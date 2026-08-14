@@ -171,4 +171,23 @@ describe('SqliteSessionRepository', () => {
       'retention-gap',
     );
   });
+
+  it('persists one device-scoped preset draft across repository restarts', async () => {
+    const adapter = new NodeSqliteAdapter();
+    const database = adapter.asExpoDatabase();
+    await migrate(database);
+    const first = new SqliteSessionRepository(database, () => 100);
+    await first.rememberDevice(device);
+    await first.savePresetDraft(device.deviceId, 7, [
+      { id: 'flow', name: 'Flow', plannedDurationMs: 1_800_000 },
+    ]);
+
+    const reopened = new SqliteSessionRepository(database, () => 200);
+    await expect(reopened.loadPresetDraft(device.deviceId)).resolves.toEqual({
+      baseRevision: 7,
+      customEntries: [{ id: 'flow', name: 'Flow', plannedDurationMs: 1_800_000 }],
+    });
+    await reopened.clearPresetDraft(device.deviceId);
+    await expect(reopened.loadPresetDraft(device.deviceId)).resolves.toBeNull();
+  });
 });
