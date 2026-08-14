@@ -18,6 +18,19 @@ target because the physical transport will require a native BLE dependency.
 | Prettier     | 3.9.6   |
 | Vitest       | 4.1.10  |
 
+## Proven native baseline
+
+| Component       | Proven version |
+| --------------- | -------------- |
+| Xcode           | 26.6 (17F113)  |
+| CocoaPods       | 1.17.0         |
+| iOS target      | 16.4           |
+| expo-dev-client | 57.0.11        |
+
+The baseline was compiled, signed, installed, and launched on a physical
+iPhone 13 Pro running iOS 26.6. A second install and launch was proven with the
+USB cable disconnected; CoreDevice reported `transportType: localNetwork`.
+
 Expo SDK 57 officially requires Node.js 22.13 or newer, React Native 0.86,
 React 19.2.3, iOS 16.4 or newer, and Xcode 26.4 or newer. This repository pins
 the exact versions proven by local workspace checks rather than following npm
@@ -65,11 +78,53 @@ The same choice can be made explicitly with
 boundary. Screens never read the environment variable or import a native BLE
 object.
 
-## Current native-tooling blocker
+## Physical iPhone Development Build
 
-The JavaScript workspace is reproducible, but the machine currently selects
-Apple Command Line Tools rather than a full Xcode installation, `simctl` is
-unavailable, and CocoaPods is not installed. A physical iPhone development
-build cannot be claimed until full Xcode 26.4 or newer is installed and selected
-and the generated native project builds successfully. The exact native and BLE
-dependency set will be pinned only after that proof.
+The machine's global `xcode-select` may still point at Apple Command Line Tools,
+so the proven commands select full Xcode explicitly without changing the global
+developer directory:
+
+```sh
+env DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
+  COCOAPODS_PARALLEL_CODE_SIGN=false \
+  pnpm --filter @focus-timer/mobile exec expo run:ios \
+  --device <xcode-device-udid> --no-bundler
+```
+
+Disabling parallel CocoaPods code signing is intentional. It prevents multiple
+pods from simultaneously requesting access to the Apple Development key in the
+login keychain.
+
+Run Metro on the LAN for the installed Development Build:
+
+```sh
+env DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
+  pnpm --filter @focus-timer/mobile exec expo start \
+  --dev-client --lan --clear
+```
+
+For wireless development, pair the iPhone with Xcode once over USB, enable
+Developer Mode, allow network connection in Xcode, and keep the Mac and iPhone
+on the same local network. With the cable disconnected, verify the transport:
+
+```sh
+env DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
+  xcrun devicectl device info details --device <coredevice-identifier>
+```
+
+The output must contain `transportType: localNetwork`. The signed app can then
+be installed and launched over that connection:
+
+```sh
+env DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
+  xcrun devicectl device install app \
+  --device <coredevice-identifier> <path-to-signed-app>
+
+env DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
+  xcrun devicectl device process launch --terminate-existing \
+  --device <coredevice-identifier> com.jarto666.focustimer
+```
+
+This proves the native shell and LAN development loop. The BLE dependency is a
+separate milestone and will be pinned only after its native iPhone build is
+proven.

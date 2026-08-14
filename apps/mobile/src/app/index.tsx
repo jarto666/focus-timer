@@ -1,126 +1,450 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { Link } from 'expo-router';
+import { SymbolView } from 'expo-symbols';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { ActionLink } from '@/ui/action-link';
 import { Page } from '@/ui/page';
+import { Sigil } from '@/ui/sigil';
 import { color, radius, space } from '@/ui/theme';
-import { Wordmark } from '@/ui/wordmark';
 
 export default function HomeScreen() {
   return (
     <Page>
-      <Wordmark />
-
-      <View style={styles.hero}>
-        <Text style={styles.kicker}>A PHYSICAL PROMISE</Text>
+      <View style={styles.heading}>
+        <Text style={styles.eyebrow}>DEVICE // 00</Text>
         <Text accessibilityRole="header" style={styles.title}>
-          Time you can hold.
+          Unpaired.
         </Text>
-        <Text style={styles.subtitle}>
-          The timer stays offline and in charge. Your phone remembers what you finished.
-        </Text>
+        <Text style={styles.headingDetail}>No Focus Timer is linked to this iPhone.</Text>
       </View>
 
-      <View style={styles.deviceCard}>
-        <View style={styles.cardHeader}>
-          <View style={styles.statusDot} />
-          <Text style={styles.cardEyebrow}>TIMER STATUS</Text>
+      <View style={styles.timerPanel}>
+        <View style={styles.panelHeader}>
+          <View>
+            <Text style={styles.deviceName}>Focus Timer</Text>
+            <Text style={styles.deviceMeta}>No device linked</Text>
+          </View>
+          <View style={styles.statusBadge}>
+            <View style={styles.offlineDot} />
+            <Text style={styles.statusLabel}>OFFLINE</Text>
+          </View>
         </View>
-        <Text style={styles.cardTitle}>No timer connected</Text>
-        <Text style={styles.cardBody}>
-          Pair one nearby Focus Timer. Sessions remain fully usable before, during, and after setup.
-        </Text>
-        <ActionLink href="/device" label="Set up timer" />
+
+        <View accessible accessibilityLabel="Timer is offline" style={styles.dialStage}>
+          <View style={[styles.tick, styles.tickTop]} />
+          <View style={[styles.tick, styles.tickRight]} />
+          <View style={[styles.tick, styles.tickBottom]} />
+          <View style={[styles.tick, styles.tickLeft]} />
+          <View style={styles.outerDial}>
+            <View style={styles.arc} />
+            <View style={styles.innerDial}>
+              <Sigil name="time" size={28} />
+              <Text style={styles.time}>--:--</Text>
+              <Text style={styles.dialLabel}>AWAITING DEVICE</Text>
+            </View>
+          </View>
+        </View>
+
+        <View style={styles.panelFooter}>
+          <View style={styles.footerGlyph}>
+            <View style={styles.footerGlyphCore} />
+          </View>
+          <Text style={styles.panelMessage}>
+            Pair your physical timer to sync sessions and see its live state.
+          </Text>
+        </View>
       </View>
 
-      <View style={styles.historyBlock}>
-        <View>
-          <Text style={styles.historyCount}>00</Text>
-          <Text style={styles.historyCaption}>sessions stored locally</Text>
-        </View>
-        <ActionLink href="/history" label="Open history" tone="light" />
+      <Link asChild href="/device">
+        <Pressable accessibilityRole="button" style={styles.pairButton}>
+          <View style={styles.pairRune}>
+            <Sigil name="bifrost" size={34} />
+          </View>
+          <View style={styles.pairCopy}>
+            <Text style={styles.pairLabel}>Pair a timer</Text>
+            <Text style={styles.pairDetail}>Search nearby hardware</Text>
+          </View>
+          <SymbolView
+            fallback={<Text style={styles.pairChevronFallback}>›</Text>}
+            name="chevron.right"
+            size={14}
+            tintColor={color.background}
+            weight="semibold"
+          />
+        </Pressable>
+      </Link>
+
+      <Link asChild href="/history">
+        <Pressable accessibilityRole="button" style={styles.ledger}>
+          <View style={styles.ledgerRail}>
+            <Text style={styles.ledgerCode}>SESSION LEDGER</Text>
+            <View style={styles.localBadge}>
+              <View style={styles.localBadgeDot} />
+              <Text style={styles.localBadgeText}>LOCAL</Text>
+            </View>
+          </View>
+
+          <View style={styles.ledgerBody}>
+            <View style={styles.countBlock}>
+              <Text style={styles.ledgerCount}>00</Text>
+              <Text style={styles.ledgerUnit}>ENTRIES</Text>
+            </View>
+            <View style={styles.ledgerRule} />
+            <View style={styles.ledgerCopy}>
+              <Text style={styles.ledgerTitle}>Your focus archive</Text>
+              <Text style={styles.ledgerDetail}>Synced sessions stay on this iPhone.</Text>
+            </View>
+            <View style={styles.ledgerRune}>
+              <Sigil name="norns" size={34} />
+            </View>
+          </View>
+
+          <View style={styles.ledgerTrack}>
+            <View style={styles.ledgerTrackActive} />
+          </View>
+        </Pressable>
+      </Link>
+
+      <View style={styles.localRow}>
+        <SymbolView
+          fallback={<Text style={styles.localFallback}>✓</Text>}
+          name="lock.shield"
+          size={15}
+          tintColor={color.faintText}
+        />
+        <Text style={styles.localText}>Local-first · no account · no cloud required</Text>
       </View>
     </Page>
   );
 }
 
 const styles = StyleSheet.create({
-  hero: {
-    paddingBottom: space.xl,
-    paddingTop: 76,
-  },
-  kicker: {
-    color: color.signal,
-    fontFamily: 'Courier',
-    fontSize: 12,
-    fontWeight: '700',
-    letterSpacing: 1.5,
-    marginBottom: space.md,
-  },
-  title: {
-    color: color.ink,
-    fontFamily: 'Georgia',
-    fontSize: 58,
-    letterSpacing: -2.8,
-    lineHeight: 58,
-    maxWidth: 340,
-  },
-  subtitle: {
-    color: color.mutedInk,
-    fontSize: 17,
-    lineHeight: 26,
-    marginTop: space.lg,
-    maxWidth: 350,
-  },
-  deviceCard: {
-    backgroundColor: color.signal,
-    borderRadius: radius.card,
-    gap: space.md,
-    padding: space.lg,
-  },
-  cardHeader: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: space.sm,
-  },
-  statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: color.ink,
-  },
-  cardEyebrow: {
-    color: color.ink,
-    fontFamily: 'Courier',
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 1.2,
-  },
-  cardTitle: {
-    color: color.ink,
-    fontSize: 28,
-    fontWeight: '800',
-    letterSpacing: -0.8,
-  },
-  cardBody: {
-    color: color.ink,
-    fontSize: 15,
-    lineHeight: 22,
-    marginBottom: space.xs,
-    opacity: 0.78,
-  },
-  historyBlock: {
-    gap: space.lg,
+  heading: {
+    paddingBottom: space.lg,
     paddingTop: space.xl,
   },
-  historyCount: {
-    color: color.ink,
-    fontFamily: 'Georgia',
-    fontSize: 64,
-    letterSpacing: -3,
-    lineHeight: 68,
+  eyebrow: {
+    color: color.accent,
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 2,
+    marginBottom: 8,
   },
-  historyCaption: {
-    color: color.mutedInk,
+  title: {
+    color: color.text,
+    fontSize: 31,
+    fontWeight: '700',
+    letterSpacing: -1,
+    lineHeight: 36,
+  },
+  headingDetail: {
+    color: color.mutedText,
+    fontSize: 13,
+    marginTop: 7,
+  },
+  timerPanel: {
+    backgroundColor: color.backgroundLifted,
+    borderColor: color.line,
+    borderRadius: radius.panel,
+    borderWidth: 1,
+    overflow: 'hidden',
+    padding: space.md,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 16 },
+    shadowOpacity: 0.34,
+    shadowRadius: 28,
+  },
+  panelHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  deviceName: {
+    color: color.text,
     fontSize: 15,
+    fontWeight: '700',
+  },
+  deviceMeta: {
+    color: color.mutedText,
+    fontSize: 12,
+    marginTop: 3,
+  },
+  statusBadge: {
+    alignItems: 'center',
+    backgroundColor: color.surface,
+    borderColor: color.line,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  offlineDot: {
+    backgroundColor: color.faintText,
+    borderRadius: 3,
+    height: 6,
+    width: 6,
+  },
+  statusLabel: {
+    color: color.mutedText,
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 1.1,
+  },
+  dialStage: {
+    alignItems: 'center',
+    height: 240,
+    justifyContent: 'center',
+    marginVertical: 4,
+  },
+  outerDial: {
+    alignItems: 'center',
+    borderColor: color.lineBright,
+    borderRadius: 104,
+    borderWidth: 1,
+    height: 208,
+    justifyContent: 'center',
+    shadowColor: color.accent,
+    shadowOpacity: 0.12,
+    shadowRadius: 24,
+    width: 208,
+  },
+  arc: {
+    position: 'absolute',
+    borderBottomColor: 'transparent',
+    borderColor: color.accent,
+    borderLeftColor: 'transparent',
+    borderRadius: 104,
+    borderWidth: 2,
+    height: 208,
+    opacity: 0.72,
+    transform: [{ rotate: '-32deg' }],
+    width: 208,
+  },
+  innerDial: {
+    alignItems: 'center',
+    backgroundColor: color.surface,
+    borderColor: color.line,
+    borderRadius: 84,
+    borderWidth: 1,
+    height: 168,
+    justifyContent: 'center',
+    width: 168,
+  },
+  time: {
+    color: color.text,
+    fontSize: 39,
+    fontVariant: ['tabular-nums'],
+    fontWeight: '300',
+    letterSpacing: 1.5,
+    lineHeight: 49,
+    marginTop: 5,
+  },
+  dialLabel: {
+    color: color.faintText,
+    fontSize: 8,
+    fontWeight: '800',
+    letterSpacing: 1.6,
+  },
+  tick: {
+    position: 'absolute',
+    backgroundColor: color.lineBright,
+    borderRadius: 1,
+    height: 8,
+    width: 2,
+  },
+  tickTop: { top: 8 },
+  tickRight: { right: 42, transform: [{ rotate: '90deg' }] },
+  tickBottom: { bottom: 8 },
+  tickLeft: { left: 42, transform: [{ rotate: '90deg' }] },
+  panelFooter: {
+    alignItems: 'center',
+    backgroundColor: color.accentWash,
+    borderColor: color.line,
+    borderRadius: radius.card,
+    borderWidth: 1,
+    flexDirection: 'row',
+    padding: 12,
+  },
+  footerGlyph: {
+    alignItems: 'center',
+    borderColor: color.accent,
+    borderWidth: 1,
+    height: 18,
+    justifyContent: 'center',
+    marginLeft: 2,
+    marginRight: 12,
+    transform: [{ rotate: '45deg' }],
+    width: 18,
+  },
+  footerGlyphCore: {
+    backgroundColor: color.accentBright,
+    height: 4,
+    width: 4,
+  },
+  panelMessage: {
+    color: color.mutedText,
+    flex: 1,
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  pairButton: {
+    alignItems: 'center',
+    backgroundColor: color.accent,
+    borderRadius: radius.control,
+    flexDirection: 'row',
+    marginTop: space.md,
+    minHeight: 68,
+    paddingHorizontal: space.md,
+    shadowColor: color.accent,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.16,
+    shadowRadius: 18,
+  },
+  pairRune: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(6, 17, 21, 0.12)',
+    borderColor: 'rgba(6, 17, 21, 0.16)',
+    borderRadius: 10,
+    borderWidth: 1,
+    height: 40,
+    justifyContent: 'center',
+    marginRight: 12,
+    width: 40,
+  },
+  pairCopy: {
+    flex: 1,
+  },
+  pairLabel: {
+    color: color.background,
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  pairDetail: {
+    color: 'rgba(6, 17, 21, 0.62)',
+    fontSize: 12,
+    marginTop: 3,
+  },
+  pairChevronFallback: {
+    color: color.background,
+    fontSize: 22,
+  },
+  ledger: {
+    backgroundColor: color.surface,
+    borderColor: color.line,
+    borderRadius: radius.card,
+    borderWidth: 1,
+    marginTop: space.sm,
+    overflow: 'hidden',
+    padding: space.md,
+  },
+  ledgerRail: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  ledgerCode: {
+    color: color.faintText,
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 1.7,
+  },
+  localBadge: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 5,
+  },
+  localBadgeDot: {
+    backgroundColor: color.accent,
+    borderRadius: 2,
+    height: 4,
+    shadowColor: color.accent,
+    shadowOpacity: 0.9,
+    shadowRadius: 6,
+    width: 4,
+  },
+  localBadgeText: {
+    color: color.accent,
+    fontSize: 8,
+    fontWeight: '800',
+    letterSpacing: 1.2,
+  },
+  ledgerBody: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    minHeight: 82,
+    paddingTop: 5,
+  },
+  countBlock: {
+    width: 62,
+  },
+  ledgerCount: {
+    color: color.accentBright,
+    fontSize: 32,
+    fontVariant: ['tabular-nums'],
+    fontWeight: '300',
+    letterSpacing: -1,
+  },
+  ledgerUnit: {
+    color: color.faintText,
+    fontSize: 7,
+    fontWeight: '800',
+    letterSpacing: 1.2,
+    marginTop: -1,
+  },
+  ledgerRule: {
+    backgroundColor: color.line,
+    height: 47,
+    marginRight: 14,
+    width: StyleSheet.hairlineWidth,
+  },
+  ledgerCopy: {
+    flex: 1,
+  },
+  ledgerTitle: {
+    color: color.text,
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  ledgerDetail: {
+    color: color.mutedText,
+    fontSize: 11,
+    lineHeight: 16,
+    marginTop: 4,
+  },
+  ledgerRune: {
+    alignItems: 'center',
+    backgroundColor: color.accentWash,
+    borderRadius: 11,
+    height: 42,
+    justifyContent: 'center',
+    marginLeft: 10,
+    width: 42,
+  },
+  ledgerTrack: {
+    backgroundColor: color.line,
+    height: 1,
+    marginTop: 2,
+  },
+  ledgerTrackActive: {
+    backgroundColor: color.accent,
+    height: 1,
+    opacity: 0.8,
+    width: 42,
+  },
+  localRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
+    justifyContent: 'center',
+    paddingTop: space.lg,
+  },
+  localText: {
+    color: color.faintText,
+    fontSize: 11,
+  },
+  localFallback: {
+    color: color.faintText,
+    fontSize: 12,
   },
 });

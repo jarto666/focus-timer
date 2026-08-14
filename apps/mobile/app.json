@@ -1,12 +1,12 @@
 {
   "expo": {
-    "name": "Focus Timer",
+    "name": "Muninn",
     "slug": "focus-timer",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "focus-timer",
-    "userInterfaceStyle": "automatic",
+    "userInterfaceStyle": "dark",
     "ios": {
       "bundleIdentifier": "com.jarto666.focustimer",
       "icon": "./assets/expo.icon"
@@ -29,7 +29,7 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#208AEF",
+          "backgroundColor": "#061115",
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 76
         }

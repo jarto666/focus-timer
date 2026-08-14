@@ -12,7 +12,7 @@
 
 - [x] 2.1 Add a pinned pnpm workspace for `apps/mobile`, `packages/device-protocol`, `packages/device-client`, and `packages/mock-device`, with shared strict TypeScript, formatting, lint, and test configuration.
 - [x] 2.2 Scaffold the Expo/React Native/TypeScript application with Expo Router, document mock versus physical configuration, and keep screen code independent of the selected transport.
-- [ ] 2.3 Produce and install a minimal Expo Development Build on the physical iPhone through Xcode, then pin the proven Node.js, pnpm, Expo SDK, React Native, iOS target, and native dependency versions.
+- [x] 2.3 Produce and install a minimal Expo Development Build on the physical iPhone through Xcode, then pin the proven Node.js, pnpm, Expo SDK, React Native, iOS target, and native dependency versions.
 - [ ] 2.4 Define and test the transport-neutral connection-state and `DeviceTransport` contracts, including unavailable, permission-denied, scanning, connecting, handshaking, ready, disconnected, incompatible, and retryable-error states.
 - [ ] 2.5 Implement a deterministic mock transport/device with empty, paged, duplicated, gap, changed-epoch, disconnect, incompatible-version, malformed-response, and unavailable-device scenarios.
 - [ ] 2.6 Build the first mock-backed device setup/status and local-history screen states, including honest untimestamped and incomplete-history presentation, without adding remote timer controls.

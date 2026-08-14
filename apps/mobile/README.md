@@ -38,8 +38,10 @@ Screens must not import BLE libraries or branch on the selected backend.
 
 ## Physical iPhone build
 
-The finished BLE app will use an Expo Development Build, not Expo Go, because
-BLE requires native code. Full Xcode 26.4 or newer must be installed and
-selected before generating and installing the iOS build. See
+The app uses an Expo Development Build, not Expo Go, because BLE requires native
+code. The native shell has been compiled, signed, installed, and launched on a
+physical iPhone with Xcode 26.6, CocoaPods 1.17.0, an iOS 16.4 deployment target,
+and `expo-dev-client` 57.0.11. Installation and launch are also proven over the
+local network with the USB cable disconnected. See
 [`docs/mobile-development.md`](../../docs/mobile-development.md) for the pinned
-toolchain and verification commands.
+toolchain, build commands, keychain-signing workaround, and wireless workflow.

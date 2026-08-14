@@ -6,6 +6,8 @@ node_modules/
 coverage/
 dist/
 apps/mobile/assets/
+apps/mobile/expo-env.d.ts
+apps/mobile/ios/
 device/Cargo.lock
 docs/acceptance.md
 docs/development.md
