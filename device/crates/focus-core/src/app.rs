@@ -24,6 +24,24 @@ pub enum Diagnostic {
     ClockMovedBackwards,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SessionOutcomeKind {
+    Completed,
+    Cancelled,
+}
+
+/// Semantic result of one committed session lifecycle.
+///
+/// Adapters may persist this value after the core transition has completed,
+/// but persistence failure cannot roll the transition back.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SessionOutcome {
+    pub kind: SessionOutcomeKind,
+    pub preset: Preset,
+    pub planned_duration_ms: u64,
+    pub active_duration_ms: u64,
+}
+
 /// Best-effort work for firmware adapters after state has been committed.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct Effects {
@@ -31,6 +49,7 @@ pub struct Effects {
     pub feedback: Option<FeedbackPattern>,
     pub persist_selection: Option<PresetId>,
     pub diagnostic: Option<Diagnostic>,
+    pub outcome: Option<SessionOutcome>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -107,10 +126,19 @@ impl App {
         };
 
         if self.complete_if_due(now_ms) {
+            let SessionState::Completed { active } = self.session else {
+                unreachable!();
+            };
             return Effects {
                 render: true,
                 feedback: Some(FeedbackPattern::Complete),
                 diagnostic: clock_diagnostic,
+                outcome: Some(SessionOutcome {
+                    kind: SessionOutcomeKind::Completed,
+                    preset: active,
+                    planned_duration_ms: active.duration_ms,
+                    active_duration_ms: active.duration_ms,
+                }),
                 ..Effects::default()
             };
         }
@@ -139,8 +167,28 @@ impl App {
                 },
                 InputEvent::Press,
             ) => self.resume(now_ms, active, remaining_ms),
-            (SessionState::Running { .. } | SessionState::Paused { .. }, InputEvent::LongPress)
-            | (SessionState::Completed { .. }, InputEvent::Press) => {
+            (
+                SessionState::Running {
+                    active,
+                    deadline_ms,
+                },
+                InputEvent::LongPress,
+            ) => {
+                let remaining_ms = deadline_ms.saturating_sub(now_ms);
+                self.session = SessionState::Idle;
+                cancellation_effect(active, remaining_ms)
+            }
+            (
+                SessionState::Paused {
+                    active,
+                    remaining_ms,
+                },
+                InputEvent::LongPress,
+            ) => {
+                self.session = SessionState::Idle;
+                cancellation_effect(active, remaining_ms)
+            }
+            (SessionState::Completed { .. }, InputEvent::Press) => {
                 self.session = SessionState::Idle;
                 render_effect()
             }
@@ -262,6 +310,19 @@ fn selection_effect(id: PresetId) -> Effects {
 fn diagnostic_effect(diagnostic: Diagnostic) -> Effects {
     Effects {
         diagnostic: Some(diagnostic),
+        ..Effects::default()
+    }
+}
+
+fn cancellation_effect(active: Preset, remaining_ms: u64) -> Effects {
+    Effects {
+        render: true,
+        outcome: Some(SessionOutcome {
+            kind: SessionOutcomeKind::Cancelled,
+            preset: active,
+            planned_duration_ms: active.duration_ms,
+            active_duration_ms: active.duration_ms.saturating_sub(remaining_ms),
+        }),
         ..Effects::default()
     }
 }

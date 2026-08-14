@@ -13,6 +13,8 @@ cd "$REPO_ROOT/device"
 cargo fmt --all --check
 cargo clippy -p focus-core --all-targets -- -D warnings
 cargo test -p focus-core
+cargo clippy -p focus-sync --all-targets -- -D warnings
+cargo test -p focus-sync
 cargo clippy -p focus-firmware --no-default-features \
   --target aarch64-apple-darwin --all-targets -- -D warnings
 cargo test -p focus-firmware --no-default-features \

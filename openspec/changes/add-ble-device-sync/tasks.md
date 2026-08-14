@@ -29,12 +29,12 @@
 
 ## 4. Emit Session Outcomes and Model the Journal on the Host
 
-- [ ] 4.1 Extend the pure core effect boundary with Completed and Cancelled lifecycle outcomes containing the immutable preset snapshot, planned duration, and accumulated active duration while retaining `no_std` and all existing behavior.
-- [ ] 4.2 Add core tests proving exactly one completion outcome, one running/paused cancellation outcome, paused-time exclusion, and no outcome for pause, resume, dismissal, selection, refresh, or ignored input.
-- [ ] 4.3 Implement a host-testable fixed-capacity journal model with stable device identity, journal epoch, monotonic sequence, eviction, ascending bounded pages, continuation, changed-epoch behavior, and explicit stale-cursor gaps.
-- [ ] 4.4 Implement a host-testable volatile UTC-to-monotonic clock anchor and optional session timestamp derivation, including cold-boot unknown time and backwards/overflow rejection.
-- [ ] 4.5 Define the immutable device-status projection consumed by the protocol, including timer view state, preset snapshot, remaining duration, journal bounds/health, and clock-known state without exposing mutable `App` access.
-- [ ] 4.6 Add host tests covering journal wrap, reboot reconstruction inputs, duplicate page reads, current cursors, stale cursors, epoch reset, timestamped/untimestamped records, invalid anchors, and journal-unavailable status.
+- [x] 4.1 Extend the pure core effect boundary with Completed and Cancelled lifecycle outcomes containing the immutable preset snapshot, planned duration, and accumulated active duration while retaining `no_std` and all existing behavior.
+- [x] 4.2 Add core tests proving exactly one completion outcome, one running/paused cancellation outcome, paused-time exclusion, and no outcome for pause, resume, dismissal, selection, refresh, or ignored input.
+- [x] 4.3 Implement a host-testable fixed-capacity journal model with stable device identity, journal epoch, monotonic sequence, eviction, ascending bounded pages, continuation, changed-epoch behavior, and explicit stale-cursor gaps.
+- [x] 4.4 Implement a host-testable volatile UTC-to-monotonic clock anchor and optional session timestamp derivation, including cold-boot unknown time and backwards/overflow rejection.
+- [x] 4.5 Define the immutable device-status projection consumed by the protocol, including timer view state, preset snapshot, remaining duration, journal bounds/health, and clock-known state without exposing mutable `App` access.
+- [x] 4.6 Add host tests covering journal wrap, reboot reconstruction inputs, duplicate page reads, current cursors, stale cursors, epoch reset, timestamped/untimestamped records, invalid anchors, and journal-unavailable status.
 
 ## 5. Persist and Integrate the Device Journal
 

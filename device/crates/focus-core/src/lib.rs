@@ -11,7 +11,8 @@ mod catalog;
 mod settings;
 
 pub use app::{
-    App, AppSnapshot, Diagnostic, Effects, FeedbackPattern, InputEvent, SessionState, ViewState,
+    App, AppSnapshot, Diagnostic, Effects, FeedbackPattern, InputEvent, SessionOutcome,
+    SessionOutcomeKind, SessionState, ViewState,
 };
 pub use catalog::{
     Catalog, CatalogError, DEFAULT_PRESETS, MAX_SESSION_DURATION_MS, Preset, PresetId,

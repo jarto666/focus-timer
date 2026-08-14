@@ -4,8 +4,9 @@ members = [
     "crates/focus-core",
     "crates/focus-firmware",
     "crates/focus-protocol",
+    "crates/focus-sync",
 ]
-default-members = ["crates/focus-core", "crates/focus-protocol"]
+default-members = ["crates/focus-core", "crates/focus-protocol", "crates/focus-sync"]
 
 [workspace.package]
 version = "0.1.0"

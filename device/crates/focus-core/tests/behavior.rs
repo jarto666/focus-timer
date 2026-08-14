@@ -1,7 +1,7 @@
 use focus_core::{
     App, Catalog, CatalogError, DEFAULT_PRESETS, Diagnostic, Effects, FeedbackPattern, InputEvent,
-    MAX_SESSION_DURATION_MS, Preset, SETTINGS_SCHEMA_VERSION, SessionState, SettingsFallback,
-    SettingsLoad, SettingsRecord, ViewState, restore_selection,
+    MAX_SESSION_DURATION_MS, Preset, SETTINGS_SCHEMA_VERSION, SessionOutcome, SessionOutcomeKind,
+    SessionState, SettingsFallback, SettingsLoad, SettingsRecord, ViewState, restore_selection,
 };
 
 fn catalog() -> Catalog {
@@ -144,6 +144,38 @@ fn long_press_cancels_running_and_paused_sessions() {
 }
 
 #[test]
+fn running_and_paused_cancellation_emit_one_committed_outcome() {
+    let mut running = boot();
+    let preset = running.selected_preset();
+    running.handle(1_000, InputEvent::Press);
+    let outcome = running.handle(6_000, InputEvent::LongPress).outcome;
+    assert_eq!(
+        outcome,
+        Some(SessionOutcome {
+            kind: SessionOutcomeKind::Cancelled,
+            preset,
+            planned_duration_ms: preset.duration_ms,
+            active_duration_ms: 5_000,
+        })
+    );
+    assert_eq!(running.handle(6_001, InputEvent::LongPress).outcome, None);
+
+    let mut paused = boot();
+    paused.handle(10_000, InputEvent::Press);
+    paused.handle(17_000, InputEvent::Press);
+    let outcome = paused.handle(99_000, InputEvent::LongPress).outcome;
+    assert_eq!(
+        outcome,
+        Some(SessionOutcome {
+            kind: SessionOutcomeKind::Cancelled,
+            preset,
+            planned_duration_ms: preset.duration_ms,
+            active_duration_ms: 7_000,
+        })
+    );
+}
+
+#[test]
 fn countdown_uses_deadline_and_clamps_at_zero() {
     let mut app = boot();
     let duration = app.selected_preset().duration_ms;
@@ -165,8 +197,50 @@ fn completion_effect_is_emitted_exactly_once() {
     let first = app.handle(duration, InputEvent::TimeAdvanced);
     let later = app.handle(duration + 1, InputEvent::TimeAdvanced);
     assert_eq!(first.feedback, Some(FeedbackPattern::Complete));
+    assert_eq!(
+        first.outcome,
+        Some(SessionOutcome {
+            kind: SessionOutcomeKind::Completed,
+            preset: app.selected_preset(),
+            planned_duration_ms: duration,
+            active_duration_ms: duration,
+        })
+    );
     assert_eq!(later.feedback, None);
+    assert_eq!(later.outcome, None);
     assert!(matches!(app.session(), SessionState::Completed { .. }));
+}
+
+#[test]
+fn intermediate_and_non_session_inputs_emit_no_outcome() {
+    let mut app = boot();
+
+    assert_eq!(app.handle(0, InputEvent::RotateLeft).outcome, None);
+    assert_eq!(app.handle(0, InputEvent::RotateRight).outcome, None);
+    assert_eq!(app.handle(1, InputEvent::TimeAdvanced).outcome, None);
+    assert_eq!(app.handle(2, InputEvent::LongPress).outcome, None);
+
+    assert_eq!(app.handle(10, InputEvent::Press).outcome, None);
+    assert_eq!(app.handle(20, InputEvent::Press).outcome, None);
+    assert_eq!(app.handle(1_000, InputEvent::TimeAdvanced).outcome, None);
+    assert_eq!(app.handle(2_000, InputEvent::RotateLeft).outcome, None);
+    assert_eq!(app.handle(2_000, InputEvent::Press).outcome, None);
+
+    let completion_at = 2_000 + app.snapshot(2_000).remaining_ms;
+    assert!(
+        app.handle(completion_at, InputEvent::TimeAdvanced)
+            .outcome
+            .is_some()
+    );
+    assert_eq!(
+        app.handle(completion_at + 1, InputEvent::TimeAdvanced)
+            .outcome,
+        None
+    );
+    assert_eq!(
+        app.handle(completion_at + 2, InputEvent::Press).outcome,
+        None
+    );
 }
 
 #[test]
