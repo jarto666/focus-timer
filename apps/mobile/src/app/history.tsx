@@ -6,28 +6,21 @@ import { useCompanionRuntime } from '@/application/runtime-provider';
 import { Page } from '@/ui/page';
 import { Sigil } from '@/ui/sigil';
 import { color, radius, space } from '@/ui/theme';
+import { formatElapsedDuration, resolveSessionMoment } from '@/ui/time';
 
-function formatDuration(milliseconds: number): string {
-  const totalMinutes = Math.floor(milliseconds / 60_000);
-  if (totalMinutes < 60) {
-    return `${totalMinutes}m`;
-  }
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-  return minutes === 0 ? `${hours}h` : `${hours}h ${minutes}m`;
-}
-
-function formatTimestamp(timestamp: number | null): string {
-  if (timestamp === null) {
-    return 'Time unavailable · device clock was unknown';
+function formatTimestamp(startedAtUtcMs: number | null, endedAtUtcMs: number | null): string {
+  const moment = resolveSessionMoment(startedAtUtcMs, endedAtUtcMs);
+  if (moment.timestampMs === null) {
+    return 'Date not recorded · timer had not synced with iPhone';
   }
 
-  return new Intl.DateTimeFormat(undefined, {
+  const formatted = new Intl.DateTimeFormat(undefined, {
     day: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
     month: 'short',
-  }).format(new Date(timestamp));
+  }).format(new Date(moment.timestampMs));
+  return moment.kind === 'finished' ? `Finished ${formatted}` : formatted;
 }
 
 function completenessCopy(completeness: HistoryCompleteness): string | null {
@@ -55,9 +48,11 @@ function SessionCard({ entry }: Readonly<{ entry: LocalHistoryEntry }>) {
       <View style={styles.sessionBody}>
         <View style={styles.sessionCopy}>
           <Text style={styles.sessionTitle}>{entry.presetName}</Text>
-          <Text style={styles.sessionTime}>{formatTimestamp(entry.startedAtUtcMs)}</Text>
+          <Text style={styles.sessionTime}>
+            {formatTimestamp(entry.startedAtUtcMs, entry.endedAtUtcMs)}
+          </Text>
         </View>
-        <Text style={styles.sessionDuration}>{formatDuration(entry.activeDurationMs)}</Text>
+        <Text style={styles.sessionDuration}>{formatElapsedDuration(entry.activeDurationMs)}</Text>
       </View>
       <View style={styles.durationTrack}>
         <View
@@ -98,7 +93,7 @@ export default function HistoryScreen() {
         </View>
         <View style={styles.verticalRule} />
         <View style={styles.summaryCell}>
-          <Text style={styles.summaryValue}>{formatDuration(totalActiveMs)}</Text>
+          <Text style={styles.summaryValue}>{formatElapsedDuration(totalActiveMs)}</Text>
           <Text style={styles.summaryLabel}>RECORDED FOCUS</Text>
         </View>
       </View>

@@ -8,13 +8,7 @@ import { useCompanionRuntime } from '@/application/runtime-provider';
 import { Page } from '@/ui/page';
 import { Sigil } from '@/ui/sigil';
 import { color, radius, space } from '@/ui/theme';
-
-function formatTimer(milliseconds: number): string {
-  const totalSeconds = Math.max(0, Math.floor(milliseconds / 1_000));
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
-}
+import { formatCountdown } from '@/ui/time';
 
 function connectionCopy(connection: DeviceConnectionState) {
   switch (connection.phase) {
@@ -189,7 +183,7 @@ export default function HomeScreen() {
           accessibilityLabel={
             status === null
               ? `Timer ${dialLabel.toLowerCase()}`
-              : `${status.presetName}, ${formatTimer(displayedRemaining ?? 0)} remaining`
+              : `${status.presetName}, ${formatCountdown(displayedRemaining ?? 0)} remaining`
           }
           style={styles.dialStage}
         >
@@ -202,7 +196,7 @@ export default function HomeScreen() {
             <View style={styles.innerDial}>
               <Sigil name="time" size={28} />
               <Text style={styles.time}>
-                {displayedRemaining === null ? '--:--' : formatTimer(displayedRemaining)}
+                {displayedRemaining === null ? '--:--' : formatCountdown(displayedRemaining)}
               </Text>
               <Text style={styles.dialLabel}>{dialLabel}</Text>
             </View>
