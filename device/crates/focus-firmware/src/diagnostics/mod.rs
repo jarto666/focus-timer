@@ -3,6 +3,7 @@
 const DIAGNOSTIC_COUNT: usize = cfg!(feature = "ring-diagnostic") as usize
     + cfg!(feature = "encoder-diagnostic") as usize
     + cfg!(feature = "oled-diagnostic") as usize
+    + cfg!(feature = "tft-diagnostic") as usize
     + cfg!(feature = "buzzer-diagnostic") as usize
     + cfg!(feature = "settings-clear-diagnostic") as usize
     + cfg!(feature = "settings-corrupt-diagnostic") as usize
@@ -37,6 +38,8 @@ mod ring;
     feature = "settings-corrupt-diagnostic"
 ))]
 mod settings;
+#[cfg(feature = "tft-diagnostic")]
+mod tft;
 
 pub(super) fn run() {
     #[cfg(feature = "ble-echo-diagnostic")]
@@ -50,6 +53,9 @@ pub(super) fn run() {
 
     #[cfg(feature = "oled-diagnostic")]
     oled::run();
+
+    #[cfg(feature = "tft-diagnostic")]
+    tft::run();
 
     #[cfg(feature = "buzzer-diagnostic")]
     buzzer::run();
