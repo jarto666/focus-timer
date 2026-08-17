@@ -55,8 +55,21 @@ without erasing NVS.
 
 ## Still requiring physical acceptance
 
-GPIO20 encoder direction, sub-250-ms perceived input response, the complete
-session lifecycle with buzzer and iPhone connected, loose/unplugged-display
-behavior, and whole-device USB current remain physical checks. Battery power,
-soft power-off, OTA, enclosure work, and the LED ring remain explicitly outside
-this change.
+The combined `acceptance-diagnostic` was subsequently exercised with the TFT,
+EC11, and active buzzer connected. Boot observed high idle levels on GPIO0,
+GPIO20, and GPIO5. Clockwise and counter-clockwise detents produced
+`RotateRight` and `RotateLeft`; the display changed promptly during continuous
+animation. Start, pause, resume, completion, dismissal, and long-press cancel
+all agreed across input and TFT. Start produced its single pulse and completion
+its three-pulse cadence. NVS selection persistence committed successfully and
+the completed eight-second session appended journal sequence 6. No watchdog or
+reset occurred during the run.
+
+The connected-iPhone stress pass, loose/unplugged-display behavior, and
+whole-device USB current remain physical checks. Battery power, soft power-off,
+OTA, enclosure work, and the LED ring remain explicitly outside this change.
+
+After acceptance, the normal production image was flashed back onto the board.
+It booted cleanly with persisted settings, healthy journal bounds 1 through 6,
+BLE advertising, and the TFT worker active; no diagnostic timing overrides
+remain on the device.

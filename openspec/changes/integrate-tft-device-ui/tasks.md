@@ -26,7 +26,7 @@
 ## 4. SuperMini Production Runtime
 
 - [x] 4.1 Add and document the proposed SuperMini map: TFT GPIO6/7/3/4/10, encoder GPIO0/20/5, buzzer GPIO1, 3.3 V TFT power/backlight, and common ground.
-- [ ] 4.2 Move encoder S2 from GPIO4 to GPIO20 in the selected production profile and preserve clockwise/right semantic mapping after physical validation.
+- [x] 4.2 Move encoder S2 from GPIO4 to GPIO20 in the selected production profile and preserve clockwise/right semantic mapping after physical validation.
 - [x] 4.3 Replace synchronous OLED initialization/rendering in the production profile with TFT worker startup and non-blocking view publication.
 - [x] 4.4 Publish the newest snapshot on boot, selection changes, state transitions, visible-second changes, and catalog-confirmation changes without adding a second state owner.
 - [x] 4.5 Preserve OLED and other focused diagnostics as alternative firmware features and keep the production/diagnostic mutual-exclusion guard correct.
@@ -35,7 +35,7 @@
 ## 5. Animated Combined Runtime
 
 - [x] 5.1 Enable bounded navy/turquoise procedural animation behind the real TFT views with foreground contrast limits and no visible tile seams.
-- [ ] 5.2 Verify accepted input and state changes appear within 250 milliseconds while animation is active; tune worker priority, block size, and cadence if required.
+- [x] 5.2 Verify accepted input and state changes appear within 250 milliseconds while animation is active; tune worker priority, block size, and cadence if required.
 - [x] 5.3 Verify delayed frames coalesce safely and switch to static rendering without changing countdown accuracy or replaying stale UI.
 - [ ] 5.4 Confirm display initialization/transfer fault injection produces no panic/reboot loop and leaves encoder, timer, buzzer, storage, journal, and BLE behavior available.
 

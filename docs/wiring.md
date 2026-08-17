@@ -49,7 +49,7 @@ flowchart LR
 | Encoder power | Controller `3V3` | EC11 module pin labelled `5V` | Intentional: keeps its pull-ups at 3.3 V |
 | Encoder ground | Controller `GND` | EC11 `GND` | Common ground |
 | Encoder phase A | Controller GPIO0 | EC11 `S1` | Bench-verified |
-| Encoder phase B | Controller GPIO20 | EC11 `S2` | Proposed SuperMini production map; physical direction revalidation pending |
+| Encoder phase B | Controller GPIO20 | EC11 `S2` | Physically verified; clockwise remains `RotateRight` |
 | Encoder switch | Controller GPIO5 | EC11 `KEY` | Bench-verified |
 | External LED ring | Not connected | Store the WS2812 ring separately | Deferred; GPIO10 now belongs to TFT CS |
 | Buzzer positive | Controller GPIO1 | 330 ohm resistor, then standalone active-buzzer `+` | Bench-verified; current limited to at most approximately 10 mA |
@@ -127,7 +127,8 @@ addressable LEDs, or any other peripheral.
 
 ## Validation status
 
-- EC11: pin map, direction, short press, and long press are bench-verified.
+- EC11: the SuperMini GPIO0/GPIO20/GPIO5 pin map, clockwise/right direction,
+  short press, and long press are bench-verified with continuous TFT animation.
 - WS2812: earlier direct-GPIO diagnostics are preserved as historical evidence,
   but the reworked oversized ring is now disconnected and excluded from MVP
   acceptance. A smaller replacement will receive a fresh power/signal review.
@@ -135,7 +136,8 @@ addressable LEDs, or any other peripheral.
   SPI mode 3 and 26 MHz. The shared row-buffered diagnostic rendered a seamless
   procedural background at about 6.9 FPS without a full-screen framebuffer.
   The combined production runtime boots BLE, NVS, journal, and the isolated TFT
-  worker; full encoder lifecycle acceptance on GPIO20 remains pending.
+  worker. The combined 8-second acceptance run passed selection, start, pause,
+  resume, completion, dismissal, and cancellation on GPIO20 without a reset.
 - Buzzer: the standalone 3 V active buzzer on GPIO1 through 330 ohm produced the
   short Start and three-pulse Complete cadences at usable volume. The direct,
   current-limited path is accepted for the prototype; no transistor is required.
