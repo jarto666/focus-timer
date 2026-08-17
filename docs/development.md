@@ -119,6 +119,33 @@ clean build with a new external `CARGO_TARGET_DIR` also passed in 57.79 seconds,
 without deleting or relying on the repository's existing artifacts. The boot
 evidence is recorded in `docs/hardware.md`.
 
+### SuperMini TFT production and recovery
+
+The default production build now uses the SuperMini pin profile documented in
+[`wiring.md`](wiring.md). It starts a latest-value ST7789 worker; the OLED is no
+longer initialized by production but remains independently diagnostic.
+
+From `device/crates/focus-firmware`, build the isolated TFT image with:
+
+```sh
+MCU=esp32c3 cargo +esp build --offline -Zbuild-std=std,panic_abort \
+  --target riscv32imc-esp-espidf --no-default-features --features tft-diagnostic
+```
+
+Restore the combined production firmware without erasing NVS with:
+
+```sh
+MCU=esp32c3 cargo +esp build --offline -Zbuild-std=std,panic_abort \
+  --target riscv32imc-esp-espidf
+espflash flash --port /dev/cu.usbmodem101 --before usb-reset \
+  ../../target/riscv32imc-esp-espidf/debug/focus-firmware
+```
+
+The display uses fixed eight-row RGB565 transfer buffers, not a full-screen
+framebuffer. A display initialization or transfer error is logged and leaves
+timer, buzzer, persistence, journal, and BLE work alive. Battery power, soft
+power-off, OTA, enclosure work, and the LED ring are deferred to later changes.
+
 ## Diagnostic firmware layout
 
 Alternative hardware-test entrypoints live under

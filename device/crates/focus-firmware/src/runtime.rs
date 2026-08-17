@@ -1,37 +1,25 @@
 use std::{boxed::Box, thread, time::Duration};
 
-use embedded_graphics::{
-    Drawable,
-    mono_font::{
-        MonoTextStyle,
-        ascii::{FONT_6X10, FONT_10X20},
-    },
-    pixelcolor::BinaryColor,
-    prelude::{DrawTarget, Point},
-    text::{Baseline, Text},
-};
-use embedded_hal::i2c::{ErrorType, I2c, Operation};
 use esp_idf_svc::hal::{
-    delay::TickType,
     gpio::{Output, PinDriver, Pull},
-    i2c::{I2cConfig, I2cDriver, I2cError},
     peripherals::Peripherals,
-    units::KiloHertz,
 };
 use esp_idf_svc::nvs::EspDefaultNvsPartition;
 use focus_core::{
     App, Catalog, CatalogConfirmationAction, CatalogStageError, CatalogUpdateCoordinator, Effects,
-    InputEvent, Preset, SettingsLoad, ViewState, default_presets,
+    InputEvent, Preset, SettingsLoad, ViewState,
 };
 use focus_firmware::{
     buzzer::BuzzerCadence,
+    display_worker::PublishResult,
     input::EncoderInput,
     journal_adapter::{FlushOutcome as JournalFlushOutcome, OutcomeJournalQueue},
-    presentation::{OLED_LAYOUT, OledView, catalog_confirmation_view, oled_view},
+    presentation::{tft_catalog_confirmation_view, tft_view},
     preset_storage::{commit_catalog, load_catalog},
     protocol_projection::{session_page_response, status_response_with_order},
     protocol_session::{ProtocolAction, ProtocolSession},
     settings::{FlushOutcome, QueueOutcome, SelectionPersistence, StoredSettings, load_settings},
+    tft_display::spawn_tft_worker,
 };
 use focus_protocol::{
     Capability, CatalogEntry, CatalogResult, ClockAnchorResponse, DeviceEvent, ErrorCode,
@@ -41,11 +29,6 @@ use focus_protocol::{
 };
 use focus_sync::{
     JOURNAL_CAPACITY, JournalStatus, PersistentJournal, VolatileClock, project_status,
-};
-use ssd1306::{
-    I2CDisplayInterface, Ssd1306,
-    mode::DisplayConfig,
-    prelude::{DisplayRotation, DisplaySize128x64},
 };
 
 use crate::{
@@ -58,65 +41,10 @@ use crate::{
 
 const INPUT_POLL_INTERVAL: Duration = Duration::from_millis(1);
 const TIME_ADVANCE_INTERVAL_MS: u64 = 10;
-const RENDER_RETRY_MS: u64 = 250;
-const OLED_ADDRESS: u8 = 0x3c;
-const I2C_TRANSACTION_TIMEOUT: u32 = TickType::new_millis(100).ticks();
 #[cfg(feature = "ble-fault-diagnostic")]
 const FAULT_DIAGNOSTIC_NOTIFICATION_INTERVAL_MS: u64 = 100;
 
 type DeviceJournal = PersistentJournal<NvsJournalStore, JOURNAL_CAPACITY>;
-
-/// Gives the display driver a finite deadline instead of the HAL's default
-/// `BLOCK` sentinel. A loose OLED wire must not stall the authoritative timer
-/// task until the interrupt watchdog resets the whole device.
-struct BoundedI2c<'d> {
-    driver: I2cDriver<'d>,
-}
-
-impl<'d> BoundedI2c<'d> {
-    fn new(driver: I2cDriver<'d>) -> Self {
-        Self { driver }
-    }
-}
-
-impl ErrorType for BoundedI2c<'_> {
-    type Error = I2cError;
-}
-
-impl I2c for BoundedI2c<'_> {
-    fn read(&mut self, address: u8, buffer: &mut [u8]) -> Result<(), Self::Error> {
-        self.driver
-            .read(address, buffer, I2C_TRANSACTION_TIMEOUT)
-            .map_err(Into::into)
-    }
-
-    fn write(&mut self, address: u8, bytes: &[u8]) -> Result<(), Self::Error> {
-        self.driver
-            .write(address, bytes, I2C_TRANSACTION_TIMEOUT)
-            .map_err(Into::into)
-    }
-
-    fn write_read(
-        &mut self,
-        address: u8,
-        bytes: &[u8],
-        buffer: &mut [u8],
-    ) -> Result<(), Self::Error> {
-        self.driver
-            .write_read(address, bytes, buffer, I2C_TRANSACTION_TIMEOUT)
-            .map_err(Into::into)
-    }
-
-    fn transaction(
-        &mut self,
-        address: u8,
-        operations: &mut [Operation<'_>],
-    ) -> Result<(), Self::Error> {
-        self.driver
-            .transaction(address, operations, I2C_TRANSACTION_TIMEOUT)
-            .map_err(Into::into)
-    }
-}
 
 /// Builds the large fixed-capacity journal away from the already sizeable
 /// authoritative-loop frame, then keeps it on the heap for the device's
@@ -159,7 +87,7 @@ fn runtime_built_ins() -> heapless::Vec<Preset, 13> {
         feature = "radio-failure-diagnostic"
     )))]
     {
-        return default_presets();
+        return focus_core::default_presets();
     }
     #[cfg(any(
         feature = "acceptance-diagnostic",
@@ -192,8 +120,8 @@ pub fn run() -> ! {
 
     let s1 = PinDriver::input(peripherals.pins.gpio0, Pull::Up)
         .expect("failed to configure EC11 S1 on GPIO0");
-    let s2 = PinDriver::input(peripherals.pins.gpio4, Pull::Up)
-        .expect("failed to configure EC11 S2 on GPIO4");
+    let s2 = PinDriver::input(peripherals.pins.gpio20, Pull::Up)
+        .expect("failed to configure EC11 S2 on GPIO20");
     let key = PinDriver::input(peripherals.pins.gpio5, Pull::Up)
         .expect("failed to configure EC11 KEY on GPIO5");
     let mut buzzer_output = match PinDriver::output(peripherals.pins.gpio1) {
@@ -223,51 +151,17 @@ pub fn run() -> ! {
     // generic phase A preserves clockwise=RotateRight.
     let mut input = EncoderInput::new(boot_s2, boot_s1, !boot_key);
 
-    let i2c_config = I2cConfig::new()
-        .baudrate(KiloHertz(100).into())
-        .sda_enable_pullup(true)
-        .scl_enable_pullup(true);
-    let i2c = I2cDriver::new(
-        peripherals.i2c0,
-        peripherals.pins.gpio7,
+    let display_slot = match spawn_tft_worker(
+        peripherals.spi2,
         peripherals.pins.gpio6,
-        &i2c_config,
-    );
-    let mut display = match i2c {
-        Ok(mut i2c) => {
-            log::info!("runtime stage: probing OLED at 0x{OLED_ADDRESS:02X}");
-            match i2c.write(OLED_ADDRESS, &[0x00, 0xae], I2C_TRANSACTION_TIMEOUT) {
-                Ok(()) => {
-                    let interface =
-                        I2CDisplayInterface::new_custom_address(BoundedI2c::new(i2c), OLED_ADDRESS);
-                    let mut candidate =
-                        Ssd1306::new(interface, DisplaySize128x64, DisplayRotation::Rotate0)
-                            .into_buffered_graphics_mode();
-                    match candidate.init() {
-                        Ok(()) => {
-                            log::info!("runtime stage: OLED initialized");
-                            Some(candidate)
-                        }
-                        Err(error) => {
-                            log::error!(
-                                "SSD1306 initialization failed: {error:?}; continuing without a display"
-                            );
-                            None
-                        }
-                    }
-                }
-                Err(error) => {
-                    log::error!(
-                        "OLED did not ACK within 100 ms: {error:?}; continuing without a display"
-                    );
-                    None
-                }
-            }
-        }
+        peripherals.pins.gpio7,
+        peripherals.pins.gpio10,
+        peripherals.pins.gpio3,
+        peripherals.pins.gpio4,
+    ) {
+        Ok(slot) => Some(slot),
         Err(error) => {
-            log::error!(
-                "failed to configure OLED I2C on GPIO6/GPIO7: {error:?}; continuing without a display"
-            );
+            log::error!("failed to spawn TFT worker: {error:?}; continuing as a headless timer");
             None
         }
     };
@@ -432,9 +326,9 @@ pub fn run() -> ! {
     let mut outcome_queue = OutcomeJournalQueue::new();
     let mut next_time_advance_ms = 0;
     let mut next_live_status_ms = 0;
-    let mut next_render_attempt_ms = 0;
     let mut render_pending = boot_effects.render;
     let mut rendered_second = None;
+    let mut display_generation = 0_u64;
     #[cfg(feature = "ble-fault-diagnostic")]
     let mut next_notification_poll_ms = 0;
 
@@ -443,7 +337,7 @@ pub fn run() -> ! {
     }
 
     log::info!(
-        "integrated runtime ready: OLED=0x{OLED_ADDRESS:02X} GPIO6/GPIO7; EC11 S1=GPIO0 S2=GPIO4 KEY=GPIO5; active buzzer=GPIO1 through 330 ohm; boot levels S1={boot_s1} S2={boot_s2} KEY={boot_key}"
+        "integrated SuperMini runtime ready: TFT SCLK=GPIO6 MOSI=GPIO7 RES=GPIO3 DC=GPIO4 CS=GPIO10; EC11 S1=GPIO0 S2=GPIO20 KEY=GPIO5; active buzzer=GPIO1; boot levels S1={boot_s1} S2={boot_s2} KEY={boot_key}"
     );
     log_resource_snapshot("idle-ready");
     #[cfg(feature = "acceptance-diagnostic")]
@@ -455,6 +349,10 @@ pub fn run() -> ! {
     #[cfg(feature = "radio-failure-diagnostic")]
     log::warn!(
         "RADIO FAILURE DIAGNOSTIC: BLE is intentionally absent and all five presets are temporarily shortened to 8 seconds"
+    );
+    #[cfg(feature = "tft-failure-diagnostic")]
+    log::warn!(
+        "TFT FAILURE DIAGNOSTIC: the worker injects one transfer failure, then retries the newest view"
     );
 
     loop {
@@ -727,29 +625,24 @@ pub fn run() -> ! {
             render_pending = true;
         }
 
-        if render_pending && now_ms >= next_render_attempt_ms {
-            let view = catalog_updates
-                .pending_entry_count()
-                .map_or_else(|| oled_view(snapshot), catalog_confirmation_view);
-            if let Some(display) = display.as_mut() {
-                display.clear_buffer();
-                draw_view(display, &view).expect("drawing into the OLED buffer must succeed");
-                match display.flush() {
-                    Ok(()) => {
-                        log::info!(
-                            "OLED render: state={} preset={} time={}",
-                            view.state_label,
-                            view.preset_name,
-                            view.time.as_str()
-                        );
+        if render_pending {
+            let candidate_generation = display_generation.saturating_add(1);
+            let view = catalog_updates.pending_entry_count().map_or_else(
+                || tft_view(&snapshot, candidate_generation),
+                |count| tft_catalog_confirmation_view(count, candidate_generation),
+            );
+            if let Some(slot) = display_slot.as_ref() {
+                match slot.try_publish(view) {
+                    PublishResult::Accepted => {
+                        display_generation = candidate_generation;
                         render_pending = false;
                         rendered_second = Some(visible_second);
                     }
-                    Err(error) => {
-                        log::error!(
-                            "OLED render failed: {error:?}; timer state retained, retrying newest snapshot"
+                    PublishResult::Busy => {}
+                    PublishResult::Stale => {
+                        log::warn!(
+                            "TFT publisher rejected stale generation={candidate_generation}; retaining render request"
                         );
-                        next_render_attempt_ms = now_ms.saturating_add(RENDER_RETRY_MS);
                     }
                 }
             } else {
@@ -1338,43 +1231,4 @@ fn set_buzzer_output(output: &mut Option<PinDriver<'_, Output>>, on: bool) {
 
 fn visible_second(remaining_ms: u64) -> u64 {
     remaining_ms / 1_000 + u64::from(remaining_ms % 1_000 != 0)
-}
-
-fn draw_view<D>(target: &mut D, view: &OledView) -> Result<(), D::Error>
-where
-    D: DrawTarget<Color = BinaryColor>,
-{
-    let small = MonoTextStyle::new(&FONT_6X10, BinaryColor::On);
-    let large = MonoTextStyle::new(&FONT_10X20, BinaryColor::On);
-
-    Text::with_baseline(
-        view.state_label,
-        Point::new(0, i32::from(OLED_LAYOUT.state_y)),
-        small,
-        Baseline::Top,
-    )
-    .draw(target)?;
-    Text::with_baseline(
-        view.preset_name.as_str(),
-        Point::new(0, i32::from(OLED_LAYOUT.preset_y)),
-        small,
-        Baseline::Top,
-    )
-    .draw(target)?;
-    Text::with_baseline(
-        view.time.as_str(),
-        Point::new(0, i32::from(OLED_LAYOUT.time_y)),
-        large,
-        Baseline::Top,
-    )
-    .draw(target)?;
-    Text::with_baseline(
-        view.hint,
-        Point::new(0, i32::from(OLED_LAYOUT.hint_y)),
-        small,
-        Baseline::Top,
-    )
-    .draw(target)?;
-
-    Ok(())
 }

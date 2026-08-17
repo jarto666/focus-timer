@@ -10,13 +10,16 @@ publish = false
 default = ["esp-idf-runtime"]
 esp-idf-runtime = [
     "dep:embedded-hal",
-    "dep:embedded-graphics",
+    "display-worker",
+    "tft-renderer",
     "dep:esp32-nimble",
     "dep:esp-idf-svc",
     "dep:getrandom",
     "dep:log",
     "dep:ssd1306",
 ]
+display-worker = []
+tft-renderer = ["dep:embedded-graphics"]
 # Internal aggregate selected transitively by concrete diagnostic modes.
 diagnostic-firmware = ["esp-idf-runtime"]
 ring-diagnostic = ["diagnostic-firmware"]
@@ -29,6 +32,7 @@ buzzer-diagnostic = ["diagnostic-firmware"]
 acceptance-diagnostic = ["esp-idf-runtime", "dep:focus-esp-resources"]
 ble-fault-diagnostic = ["acceptance-diagnostic"]
 radio-failure-diagnostic = ["esp-idf-runtime"]
+tft-failure-diagnostic = ["acceptance-diagnostic"]
 settings-clear-diagnostic = ["diagnostic-firmware"]
 settings-corrupt-diagnostic = ["diagnostic-firmware"]
 journal-clear-diagnostic = ["diagnostic-firmware"]

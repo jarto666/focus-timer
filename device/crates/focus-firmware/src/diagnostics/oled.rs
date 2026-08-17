@@ -16,7 +16,7 @@ use esp_idf_svc::hal::{
     peripherals::Peripherals,
     units::KiloHertz,
 };
-use focus_core::{AppSnapshot, DEFAULT_PRESETS, ViewState};
+use focus_core::{AppSnapshot, ViewState, default_catalog};
 use ssd1306::{
     I2CDisplayInterface, Ssd1306,
     mode::DisplayConfig,
@@ -56,21 +56,22 @@ pub(super) fn run() -> ! {
         .into_buffered_graphics_mode();
     display.init().expect("SSD1306 initialization must succeed");
 
-    let preset = DEFAULT_PRESETS[2];
+    let preset = default_catalog().preset(2);
+    let duration_ms = preset.duration_ms;
     let snapshots = [
         AppSnapshot {
             state: ViewState::Idle,
-            preset,
-            remaining_ms: preset.duration_ms,
+            preset: preset.clone(),
+            remaining_ms: duration_ms,
         },
         AppSnapshot {
             state: ViewState::Running,
-            preset,
+            preset: preset.clone(),
             remaining_ms: 24 * 60_000 + 37_000,
         },
         AppSnapshot {
             state: ViewState::Paused,
-            preset,
+            preset: preset.clone(),
             remaining_ms: 24 * 60_000 + 37_000,
         },
         AppSnapshot {
@@ -84,8 +85,8 @@ pub(super) fn run() -> ! {
         "OLED initialized: 128x64, rotation=0, controller 3V3 pull-ups enabled; cycling READY/FOCUS/PAUSED/COMPLETE every 3 seconds"
     );
     loop {
-        for snapshot in snapshots {
-            let view = oled_view(snapshot);
+        for snapshot in &snapshots {
+            let view = oled_view(snapshot.clone());
             display.clear_buffer();
             draw_view(&mut display, &view).expect("drawing into the OLED buffer must succeed");
             display.flush().expect("OLED frame transfer must succeed");
@@ -135,7 +136,7 @@ where
     )
     .draw(target)?;
     Text::with_baseline(
-        view.preset_name,
+        view.preset_name.as_str(),
         Point::new(0, i32::from(OLED_LAYOUT.preset_y)),
         small,
         Baseline::Top,
